@@ -259,7 +259,7 @@ so the conversion is never a surprise:
 | Wave Bard (sample) | tuned-to-C mono sample staged into a bank |
 | Wave Bard (rhythm) | rhythm pattern + step count staged into the firmware draft |
 | FX Wizard (rhythm) | rhythm pattern + step count → `.uf2`, "generate firmware" button |
-| SP-404 | 16-bit linear 44.1 kHz WAV into SD `IMPORT/`; manual import steps shown |
+| SP-404 | 16-bit linear 48 kHz WAV into SD `IMPORT/`; manual import steps shown |
 
 ---
 
@@ -277,7 +277,14 @@ without hardware.
 | OP-1 synth/tape | 48k f32 stereo | AIFC, 44.1 kHz | downsample → write AIFC |
 | Spotykach | 48k f32 stereo | 48k f32 stereo WAV ≤ 42 s stored | retime if needed (speed pass), else pass-through |
 | Wave Bard | 48k f32 stereo | mono WAV, tuned C, silence trimmed | downmix → pitch-to-C → trim → feed loader inputs |
-| SP-404 | 48k f32 stereo | 16-bit linear WAV | downsample to 44.1 k → dither to 16-bit |
+| SP-404 | 48k f32 stereo | 16-bit linear WAV | keep 48 kHz (device-native rate) → dither to 16-bit |
+
+> SP-404 rate reference: the authoritative source is
+> [TuscanPL/SparkyMK2](https://github.com/TuscanPL/SparkyMK2) —
+> `crates/sp404-formats/src/smp.rs` sets `SAMPLE_RATE = 48_000`, and the README
+> states the MK2 imports WAV/AIFF/FLAC/MP3 at any rate and stores at 48 kHz
+> 16-bit internally. The earlier "44.1 kHz" assumption was wrong; the target is
+> 48 kHz 16-bit.
 
 ### Rhythm patterns (canonical: step/gate JSON)
 
