@@ -1,0 +1,37 @@
+     This is a Linux mount issue, not the OP-1 itself, since the device node shows up. Here's how I'd chase it
+     down.
+
+     First confirm what the kernel sees. Plug the OP-1 in and run:
+
+       lsblk
+       blkid
+       dmesg | tail -30
+
+     "Appears but not mounts" is almost always one of four things:
+
+     1. Dirty filesystem. If the OP-1 was unplugged without ejecting, the FAT volume is marked dirty and Linux
+     refuses or mounts it read-only. Fix: mount it manually read-write with repair, or run a filesystem check.
+
+       sudo mount -t vfat /dev/sdX /mnt/op1 -o rw,uid=1000,gid=1000
+
+       (replace /dev/sdX with what lsblk shows — often the whole device, not a partition; the OP-1 sometimes
+     exposes no partition table)
+
+       If it refuses, force a check:
+
+       sudo fsck.vfat -a /dev/sdX
+
+     2. Missing vfat/exfat tooling. The OP-1 is FAT-formatted. If your system only has exfat and not vfat mount
+     support it'll fail silently. lsmod | grep vfat and which mkfs.vfat will tell you. On Pop the kernel has vfat
+     built in, so this is unlikely.
+
+     3. The cable is passing power but data is marginal. The device node appearing argues against this, but a
+     flaky cable can enumerate then drop. Try a known-good data cable and a different USB port (prefer a direct
+     port, not a hub).
+
+     4. The OP-1 is in a stuck disk-mode state. Power it off fully (hold power ~5s until it's dark, not just
+     asleep), then hold SHIFT + COM while it boots to re-enter disk mode cleanly.
+
+     Order I'd try: run the three diagnostic commands first so we know whether it's a raw device, a partition, or
+     a dirty-volume error. Then the manual mount with fsck. Tell me what lsblk and dmesg show and I'll point at
+     the exact fix.
