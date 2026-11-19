@@ -160,7 +160,12 @@ def to_sp404(src: bytes) -> bytes:
 
 
 def to_op1_drum(src: bytes, filename: str) -> bytes:
-    """Canonical -> AIFC (sowt) mono 44.1 kHz 16-bit, refusing > 12 s."""
+    """Canonical -> AIFC (sowt) mono 44.1 kHz 16-bit, refusing > 12 s.
+
+    This is the raw audio container only. A usable OP-1 drum kit also needs the
+    FVER/APPL slice metadata that ``server.devices.op1.build_drum_kit`` adds by
+    reusing op1-web's drumkit; that module is the authoritative drum path.
+    """
     mono = _decode_float(src, 1, OP1_RATE)  # measure duration from the mono decode
     duration = len(mono) / 4 / OP1_RATE
     if duration > OP1_DRUM_MAX_SECONDS:
