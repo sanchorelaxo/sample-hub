@@ -99,9 +99,14 @@ introducing a new stack.
 - **Backend:** Python 3, stdlib only (`ThreadingHTTPServer`, same as
   `op1-web`). Binds `127.0.0.1`, serves the client with `Cache-Control:
   no-store`.
-- **Frontend:** vanilla JS + HTML5 Drag and Drop API. No build step, no
-  framework. The existing projects are already stdlib-Python + vanilla-JS and
-  this stays consistent.
+- **Frontend:** Three.js scene + DOM overlay panes. No build step, no npm
+  packages — plain ES modules with `three` vendored under `client/vendor/`,
+  exactly the house rule already proven in `op1-web` and `queneo-editor`.
+  The 3D scene is the visual frame; the panes that carry lists, drag/drop and
+  the conversion readouts are DOM overlays on top of it (the `queneo-editor`
+  split: a `three` canvas for the device, DOM `pane.js`/`toolbar.js` for the
+  data). The scene is a flat instrument rack in v1; per-instrument 3D models
+  come in the next phase (§5.1).
 - **Reuse, not rewrite:**
   - OP-1 conversion: call the `op1-web` proxy's existing routes, or import its
     AIFC converter.
@@ -136,7 +141,14 @@ sample-hub/
     status.py             per-instrument presence probe
   client/
     index.html
-    app.js                panes, drag/drop, job polling
+    vendor/               vendored three (module + OrbitControls + RoomEnvironment)
+    src/
+      main.js             renderer, camera, OrbitControls, RAF loop
+      scene.js            the instrument rack (flat plates in v1)
+      layout.js           rack geometry, one number per instrument position (mm)
+      panes.js            DOM overlay panes (library, per-instrument, readouts)
+      dragdrop.js         HTML5 DnD -> /api/convert
+      status.js           presence dot polling (20 s)
     styles.css
   tests/
     ...
@@ -164,6 +176,33 @@ result.
 
 The drag-and-drop is the product. Layout is a source pane plus one pane per
 instrument, all visible at once so a drop never hides its destination.
+
+### 5.1 Three.js scene (v1 rack, next-phase 3D models)
+
+The client is a `three` canvas with DOM overlay panes. What each phase puts in
+the canvas is the only part that changes.
+
+- **v1 — the rack.** A flat, shaded instrument rack built from `layout.js`
+  geometry (one number per instrument position, in millimetres, so positions
+  are never hardcoded in mesh code — the same discipline as `op1-web`'s
+  `layout.js` and `queneo-editor`'s `LAYOUT.json`). Each instrument is a
+  labelled plate with a presence-dot surface and a drop zone. The panes that
+  carry lists and readouts are DOM overlays positioned over the plate, exactly
+  like `queneo-editor`'s `pane.js`. `OrbitControls` lets the user tilt around
+  the rack; a camera reset button returns to the straight-on view.
+- **next phase — per-instrument 3D models.** Replace each plate with a real
+  model in the style already proven in the two reference repos: the OP-1 as a
+  measured `layout.js` + `model.js` + `screen.js` (from `op1-web`, whose
+  `docs/HANDOFF_THREEJS.md` documents the measured panel truth and the
+  `window.op1studio` debug handle), and the QuNeo-style boards from
+  `queneo-editor`'s `board.js` + `geometry.js` + `materials.js`. The drop
+  targets and presence dots move onto the model; the DOM panes stay, because
+  list drag/drop and the conversion readout do not belong inside a mesh.
+
+The invariant either way: **all device I/O lives behind `/api/convert`; the
+scene never talks to a device directly.** The 3D layer is presentation only,
+so the next phase can replace the rack with models without touching a line of
+the backend or the conversion matrix.
 
 ### Panes
 
@@ -291,7 +330,9 @@ existing projects' test style.
    "generate firmware" state as Wave Bard.
 8. **Status probe** — presence/transport detection per instrument (mount,
    `/dev/ttyACM*`, card, hub check for SP-404).
-9. **Server + client** — the panes, drag/drop, job queue, presence dots.
+9. **Server + three.js rack client** — the `three` rack scene, DOM overlay
+   panes, drag/drop, job queue, presence dots. No per-instrument 3D models yet
+   (that is the next phase, §5.1).
 
 **First concrete step:** milestone 1, a failing test for the canonical
 normalizer (`tests/test_normalize.py`), then the smallest implementation that
@@ -320,8 +361,9 @@ passes.
 
 ## 10. References
 
-- `op1-web` — `/home/rjodouin/Documents/git/op1-web/` (OP-1 disk mount + AIFC conversion, port 8770)
+- `op1-web` — `/home/rjodouin/Documents/git/op1-web/` (OP-1 disk mount + AIFC conversion, port 8770; three.js OP-1 model, see `docs/HANDOFF_THREEJS.md`)
 - `spottytube-ext` — `/home/rjodouin/Documents/git/spottytube-ext/` (Spotykach USB transfer bridge, port 8765)
+- `queneo-editor` — `/home/rjodouin/Documents/git/queneo-editor/` (three.js board client, see `src/queneo_editor/editor/3d-web/`)
 - Spotykach USB transfer protocol — skill `spotykach/references/usb-transfer.md`
 - Wave Bard sample loader — https://apps.bastl-instruments.com/wave-bard-sample-loader/
 - Wave Bard web app reference — skill `wave-bard/references/web-app.md`
