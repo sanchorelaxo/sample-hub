@@ -38,8 +38,9 @@ from server.library import (
     resolve,
 )
 from server.status import status_payload
+from server.device_tree import APP, tree
 
-VERSION = "0.1.0"
+VERSION = APP.get("version", "0.1.0")
 
 
 def make_server(
@@ -239,6 +240,9 @@ def make_server(
                 self._handle_health()
             elif path == "/api/status":
                 self._handle_status()
+            elif path == "/api/devices":
+                t = tree()
+                self._send_json(200, {"app": t.app, "devices": [d.to_dict() for d in t.devices]})
             elif path == "/api/library":
                 self._handle_library_list()
             elif path.startswith("/api/library/samples/"):

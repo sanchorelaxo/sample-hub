@@ -30,21 +30,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from server.devices import READY_TO_FLASH
+from server.device_tree import APP, DEVICE_ORDER, LABELS
 
 GREEN = "green"
 AMBER = "amber"
 RED = "red"
 
-# The pane order the client renders (SPEC.md §5.1), left to right.
-DEVICE_ORDER = ("op1", "spotykach", "wave_bard", "sp404", "fx_wizard")
-
-LABELS = {
-    "op1": "OP-1",
-    "spotykach": "Spotykach",
-    "wave_bard": "Wave Bard",
-    "sp404": "SP-404MK2",
-    "fx_wizard": "FX Wizard",
-}
+# Pane order + labels come from the device tree (server/devices.json) — the
+# single source of truth for the rack per TODO_1.txt item 6.
 
 # idVendor of the Linux root hub; downstream hubs share bDeviceClass 09 but a
 # different vendor, so the "on a hub" check ignores this one.
@@ -60,7 +53,7 @@ SPOTYKACH_PRODUCT = 0x5740
 # How long to wait between mount attempts on the same device. The status
 # endpoint polls often, so without a throttle a card that cannot mount would
 # hammer udisksctl on every poll.
-MOUNT_RETRY_SECONDS = 10.0
+MOUNT_RETRY_SECONDS = APP.get("mount_retry_seconds", 10.0)
 
 # A mounter takes a device node like "/dev/sda" or "/dev/mmcblk0p1" and returns
 # the mount point it landed at, or None when the mount was refused or failed.

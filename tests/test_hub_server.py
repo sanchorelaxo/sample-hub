@@ -135,7 +135,7 @@ def poll_job(port, job_id, timeout=10.0):
 def test_health_endpoint(hub):
     status, payload = request_json(hub["port"], "GET", "/api/health")
     assert status == 200
-    assert payload == {"ok": True, "version": "0.1.0"}
+    assert payload == {"ok": True, "version": hub_server.VERSION}
 
 
 def test_status_endpoint(hub):
@@ -144,6 +144,21 @@ def test_status_endpoint(hub):
     ids = [device["id"] for device in payload["devices"]]
     assert ids == ["op1", "spotykach", "wave_bard", "sp404", "fx_wizard"]
     assert isinstance(payload["generated_at"], (int, float))
+
+
+def test_devices_endpoint(hub):
+    status, payload = request_json(hub["port"], "GET", "/api/devices")
+    assert status == 200
+    assert isinstance(payload, dict)
+    assert set(payload) == {"app", "devices"}
+    ids = [device["id"] for device in payload["devices"]]
+    assert ids == ["op1", "spotykach", "wave_bard", "sp404", "fx_wizard"]
+    by_id = {d["id"]: d for d in payload["devices"]}
+    assert by_id["op1"]["sink"] is True and by_id["op1"]["source"] is True
+    assert by_id["spotykach"]["source"] is False and by_id["spotykach"]["sink"] is True
+    assert by_id["wave_bard"]["is_flashable"] is True
+    assert by_id["sp404"]["source"] is True
+    assert by_id["fx_wizard"]["is_flashable"] is True
 
 
 def test_library_list_empty(hub):
