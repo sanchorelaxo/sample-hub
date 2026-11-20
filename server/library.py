@@ -28,6 +28,8 @@ milestone.
 """
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import struct
 import subprocess
@@ -96,3 +98,112 @@ def _write_float_wav(path: Path, pcm: bytes) -> None:
         f.write(b"data")
         f.write(struct.pack("<I", data_len))
         f.write(pcm)
+
+
+LIBRARY_DATA_ENV = "SAMPLE_HUB_DATA"
+
+
+class LibraryError(LookupError):
+    """Raised when a library entry id cannot be resolved."""
+
+
+def default_library_dir() -> Path:
+    """The library root: ``$SAMPLE_HUB_DATA/library`` or ``~/.sample-hub/library``."""
+    base = Path(os.environ.get(LIBRARY_DATA_ENV, "~/.sample-hub")).expanduser()
+    return base / "library"
+
+
+def _sanitize_stem(name: str, fallback: str = "sample") -> str:
+    """ASCII filename stem from a label: alnum, underscore and hyphen only."""
+    stem = Path(name).stem
+    cleaned = "".join(c if c.isalnum() or c in "_-" else "_" for c in stem)
+    cleaned = cleaned.strip("_").lower()
+    return cleaned or fallback
+
+
+def _next_free_name(directory: Path, stem: str, suffix: str) -> str:
+    """First unused ``stem``, then ``stem-2``, ``stem-3``, ... (additive, no deletes)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    candidate = f"{stem}{suffix}"
+    index = 2
+    while (directory / candidate).exists():
+        candidate = f"{stem}-{index}{suffix}"
+        index += 1
+    return candidate
+
+
+def add_sample(src: Path | str, name: str | None = None, library_dir: Path | None = None) -> dict:
+    """Normalize ``src`` to canonical and store it in the cache as a sample entry."""
+    library_dir = library_dir or default_library_dir()
+    display_name = name or Path(src).name
+    leaf = _next_free_name(library_dir / "samples", _sanitize_stem(display_name), ".wav")
+    target = library_dir / "samples" / leaf
+    normalize(src, target)
+    return {
+        "id": leaf,
+        "name": leaf,
+        "type": "sample",
+        "bytes": target.stat().st_size,
+        "rate": CANONICAL_RATE,
+        "channels": CANONICAL_CHANNELS,
+    }
+
+
+def add_rhythm(step_data: dict, name: str, library_dir: Path | None = None) -> dict:
+    """Store a step/gate dict as a rhythm entry in the cache."""
+    library_dir = library_dir or default_library_dir()
+    leaf = _next_free_name(library_dir / "rhythms", _sanitize_stem(name, fallback="rhythm"), ".json")
+    target = library_dir / "rhythms" / leaf
+    target.write_text(json.dumps(step_data, sort_keys=True))
+    return {
+        "id": leaf,
+        "name": leaf,
+        "type": "rhythm",
+        "steps": step_data.get("steps"),
+        "gates": step_data.get("gates", []),
+    }
+
+
+def list_entries(library_dir: Path | None = None) -> dict:
+    """Every cached entry, split into ``samples`` and ``rhythms`` (metadata only)."""
+    library_dir = library_dir or default_library_dir()
+    samples = []
+    for path in sorted((library_dir / "samples").glob("*.wav")):
+        samples.append(
+            {
+                "id": path.name,
+                "name": path.name,
+                "type": "sample",
+                "bytes": path.stat().st_size,
+                "rate": CANONICAL_RATE,
+                "channels": CANONICAL_CHANNELS,
+            }
+        )
+    rhythms = []
+    for path in sorted((library_dir / "rhythms").glob("*.json")):
+        try:
+            step_data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        rhythms.append(
+            {
+                "id": path.name,
+                "name": path.name,
+                "type": "rhythm",
+                "steps": step_data.get("steps"),
+                "gates": step_data.get("gates", []),
+            }
+        )
+    return {"samples": samples, "rhythms": rhythms}
+
+
+def resolve(source_id: str, library_dir: Path | None = None) -> tuple[str, bytes | dict]:
+    """Resolve a cache id to ``("sample", canonical_bytes)`` or ``("rhythm", step_data)``."""
+    library_dir = library_dir or default_library_dir()
+    sample_path = library_dir / "samples" / source_id
+    rhythm_path = library_dir / "rhythms" / source_id
+    if sample_path.is_file():
+        return "sample", sample_path.read_bytes()
+    if rhythm_path.is_file():
+        return "rhythm", json.loads(rhythm_path.read_text())
+    raise LibraryError(source_id)
