@@ -168,6 +168,34 @@ def test_spotykach_red_when_bare_tty_acm_has_no_usb_ids(tmp_path):
     assert result["spotykach"].state == "red"
 
 
+def test_spotykach_green_when_usb_midi_without_tty_acm(tmp_path):
+    """A Spotykach in its default USB MIDI mode exposes the same VID/PID but no
+    CDC ACM port; the hub auto-switches it to transfer mode on write, so the dot
+    is green, not the old red that only saw a transfer-mode ttyACM."""
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    device_dir = usb / "spotykach-midi"
+    device_dir.mkdir()
+    (device_dir / "idVendor").write_text("0483")
+    (device_dir / "idProduct").write_text("5740")
+    result = probe((block, tty, usb, mounts, staging))
+    assert result["spotykach"].state == "green"
+    assert result["spotykach"].present is True
+    assert "MIDI" in result["spotykach"].detail
+
+
+def test_spotykach_red_when_foreign_usb_device_only(tmp_path):
+    """A non-Spotykach USB device (the SP-404MK2's VID/PID) with no ttyACM must
+    not light the Spotykach pane: the USB scan matches VID/PID, not any device."""
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    device_dir = usb / "sp404-usb"
+    device_dir.mkdir()
+    (device_dir / "idVendor").write_text("0582")
+    (device_dir / "idProduct").write_text("02e7")
+    result = probe((block, tty, usb, mounts, staging))
+    assert result["spotykach"].state == "red"
+    assert result["spotykach"].present is False
+
+
 def test_sp404_green_when_import_card_mounted(tmp_path):
     block, tty, usb, mounts, staging = empty_world(tmp_path)
     make_block(block, "mmcblk0")

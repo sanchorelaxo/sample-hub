@@ -51,8 +51,9 @@ LABELS = {
 ROOT_HUB_VENDOR = "1d6b"
 HUB_CLASS = "09"
 
-# Spotykach enumerates as a USB CDC ACM port, but so does the SP-404MK2, so a
-# bare ttyACM match is not enough: match the Spotykach's VID/PID instead.
+# The Spotykach exposes VID 0483 / PID 5740 in BOTH of its USB modes: USB MIDI
+# (its default) and USB CDC ACM transfer mode. The SP-404MK2 is also a CDC ACM
+# port, so presence is the Spotykach's VID/PID rather than a bare ttyACM match.
 SPOTYKACH_VENDOR = 0x0483
 SPOTYKACH_PRODUCT = 0x5740
 
@@ -290,7 +291,27 @@ def _usb_ids(tty_sys_path: Path) -> tuple[int, int] | None:
     return None
 
 
-def _probe_spotykach(tty_dir: Path) -> DeviceStatus:
+def _spotykach_usb_present(usb_dir: Path) -> bool:
+    """True when a USB device carries the Spotykach's VID/PID.
+
+    The VID/PID is present in both USB modes (MIDI and CDC ACM transfer), so this
+    is the presence signal; the mode is told apart by whether a ttyACM port also
+    exists. Interface dirs under /sys/bus/usb/devices are symlinks with no idVendor
+    of their own, so they fall through harmlessly.
+    """
+    vendor = f"{SPOTYKACH_VENDOR:04x}"
+    product = f"{SPOTYKACH_PRODUCT:04x}"
+    if not usb_dir.is_dir():
+        return False
+    for entry in usb_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        if _read_text(entry / "idVendor") == vendor and _read_text(entry / "idProduct") == product:
+            return True
+    return False
+
+
+def _probe_spotykach(tty_dir: Path, usb_dir: Path) -> DeviceStatus:
     ports: list[str] = []
     if tty_dir.is_dir():
         for sys_path in sorted(tty_dir.glob("ttyACM*")):
@@ -300,8 +321,19 @@ def _probe_spotykach(tty_dir: Path) -> DeviceStatus:
         return DeviceStatus(
             "spotykach", LABELS["spotykach"], "usb_cdc", GREEN, True, ", ".join(ports)
         )
+    if _spotykach_usb_present(usb_dir):
+        # Present in its default USB MIDI mode. A write auto-switches it to
+        # transfer mode (sk_usb.SkLink.open), so it is ready, not blocked.
+        return DeviceStatus(
+            "spotykach",
+            LABELS["spotykach"],
+            "usb_cdc",
+            GREEN,
+            True,
+            "in MIDI mode — switches to transfer mode on write",
+        )
     return DeviceStatus(
-        "spotykach", LABELS["spotykach"], "usb_cdc", RED, False, "no Spotykach on /dev/ttyACM*"
+        "spotykach", LABELS["spotykach"], "usb_cdc", RED, False, "no Spotykach connected"
     )
 
 
@@ -441,7 +473,7 @@ def probe(
 
     results = {
         "op1": _probe_op1(block, mounts_text, mounter, clock),
-        "spotykach": _probe_spotykach(tty),
+        "spotykach": _probe_spotykach(tty, usb),
         "wave_bard": _probe_staged("wave_bard", staging, update_mode_devices),
         "sp404": _probe_sp404(block, mounts_text, mounter, clock),
         "fx_wizard": _probe_staged("fx_wizard", staging, update_mode_devices),
