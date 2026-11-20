@@ -352,17 +352,21 @@ passes.
 - **OP-1 synth-patch format** is more complex than a plain AIFC file; confirm
   the exact patch container before promising synth/tape drops in v1. Drum kits
   are already proven in `op1-web`.
-- **SP-404 exact `IMPORT` folder path** (SD card sub-structure) should be
-  confirmed from the unit before wiring the writer. Current spec assumes the
-  top-level `IMPORT/` folder the manual names.
+- **SP-404 exact `IMPORT` folder path** — RESOLVED (2026-11-20). The SP-404MK2
+  must format its own SD card (FAT32), never a computer: `SHIFT+pad14` (or
+  `SHIFT+pad13 → UTILITY → IMPORT`) opens the IMPORT/EXPORT MENU, then
+  `FORMAT SD-CARD`. The unit creates top-level `IMPORT/` and `EXPORT/`; samples
+  go directly into `IMPORT/` (subfolders inside it are shown on the unit).
+  Unit-side import is `SHIFT+pad13 → UTILITY → IMPORT → IMPORT from SD-CARD →
+  SAMPLE`. Writer targets top-level `IMPORT/` — confirmed correct.
 - **Wave Bard and FX Wizard `.uf2` generation offline** — v1 hands off to the
   Bastl web loaders (sample loader and Chamber). Generating `.uf2` locally is a
   later milestone gated on the `bastl-instruments/kastle2` toolchain being
   scriptable. Both loaders save/load a "draft file", which the hub should read
   and write so a user can round-trip their banks and rhythms.
-- **SP-404 hub detection** — whether a hub-connected unit can be reliably
-  detected (vs. simply absent) needs a probe; the UI treats it as "replug
-  direct" until proven otherwise.
+- **SP-404 hub detection** — implemented in the M8 status probe: a hub-backed
+  card reader reports amber "replug direct" (SPEC §2). Confirmed by synthetic
+  sysfs tests; not yet verified against the real unit.
 
 ---
 
