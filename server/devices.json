@@ -5,10 +5,10 @@
     "mount_retry_seconds": 10.0
   },
   "devices": [
-    { "id": "op1", "label": "OP-1", "sink": true, "source": true, "is_flashable": false },
-    { "id": "spotykach", "label": "Spotykach", "sink": true, "source": false, "is_flashable": false },
-    { "id": "wave_bard", "label": "Wave Bard", "sink": true, "source": false, "is_flashable": true },
-    { "id": "sp404", "label": "SP-404MK2", "sink": true, "source": true, "is_flashable": false },
-    { "id": "fx_wizard", "label": "FX Wizard", "sink": true, "source": false, "is_flashable": true }
+    { "id": "op1", "label": "OP-1", "sink": true, "source": true, "is_flashable": false, "accepts": ["sample"] },
+    { "id": "spotykach", "label": "Spotykach", "sink": true, "source": false, "is_flashable": false, "accepts": ["sample"] },
+    { "id": "wave_bard", "label": "Wave Bard", "sink": true, "source": false, "is_flashable": true, "accepts": ["sample", "rhythm"] },
+    { "id": "sp404", "label": "SP-404MK2", "sink": true, "source": true, "is_flashable": false, "accepts": ["sample"] },
+    { "id": "fx_wizard", "label": "FX Wizard", "sink": true, "source": false, "is_flashable": true, "accepts": ["rhythm"] }
   ]
 }

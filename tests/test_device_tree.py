@@ -18,13 +18,13 @@ from server.device_tree import DeviceTreeError
 
 def test_default_tree_classifies_instruments():
     tree = DT.tree()
-    caps = {d.id: (d.sink, d.source, d.is_flashable) for d in tree.devices}
+    caps = {d.id: (d.sink, d.source, d.is_flashable, tuple(d.accepts)) for d in tree.devices}
     assert caps == {
-        "op1": (True, True, False),        # sink-source
-        "spotykach": (True, False, False),  # sink-only
-        "wave_bard": (True, False, True),   # sink-only, flashable
-        "sp404": (True, True, False),       # sink-source
-        "fx_wizard": (True, False, True),   # sink-only, flashable
+        "op1": (True, True, False, ("sample",)),        # sink-source
+        "spotykach": (True, False, False, ("sample",)),  # sink-only
+        "wave_bard": (True, False, True, ("sample", "rhythm")),   # sink-only, flashable, both types
+        "sp404": (True, True, False, ("sample",)),       # sink-source
+        "fx_wizard": (True, False, True, ("rhythm",)),   # sink-only, flashable, rhythm only
     }
 
 
@@ -73,6 +73,7 @@ def test_defaults_for_omitted_capability_flags(tmp_path):
     assert device.sink is True
     assert device.source is False
     assert device.is_flashable is False
+    assert device.accepts == ("sample",)
     assert device.params == {}
 
 
@@ -119,6 +120,20 @@ def test_load_rejects_missing_label(tmp_path):
 def test_load_rejects_non_boolean_flag(tmp_path):
     path = tmp_path / "devices.json"
     path.write_text(json.dumps({"devices": [{"id": "a", "label": "A", "sink": "yes"}]}))
+    with pytest.raises(DeviceTreeError):
+        DT.load(path)
+
+
+def test_load_rejects_bad_accepts(tmp_path):
+    path = tmp_path / "devices.json"
+    path.write_text(json.dumps({"devices": [{"id": "a", "label": "A", "accepts": "sample"}]}))
+    with pytest.raises(DeviceTreeError):
+        DT.load(path)
+
+
+def test_load_rejects_empty_accepts(tmp_path):
+    path = tmp_path / "devices.json"
+    path.write_text(json.dumps({"devices": [{"id": "a", "label": "A", "accepts": []}]}))
     with pytest.raises(DeviceTreeError):
         DT.load(path)
 

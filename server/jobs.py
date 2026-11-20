@@ -21,12 +21,8 @@ import threading
 from collections.abc import Callable
 
 from server.devices import fx_wizard, op1, sp404, spotykach, wave_bard
+from server.device_tree import tree
 from server.status import default_staging_dir
-
-TARGETS = ("op1", "spotykach", "wave_bard", "sp404", "fx_wizard")
-
-_SAMPLE_TARGETS = ("op1", "spotykach", "sp404")
-_RHYTHM_TARGETS = ("fx_wizard",)
 
 _REJECT_NO_SAMPLE = "rhythms only — no sample input"
 _REJECT_NO_RHYTHM = "samples only"
@@ -37,14 +33,26 @@ class RejectError(ValueError):
 
 
 def reject_reason(source_type: str, target: str) -> str | None:
-    """The SPEC.md §6 reason to refuse this drop, or None when it is allowed."""
-    if target not in TARGETS:
+    """The SPEC.md §6 reason to refuse this drop, or None when it is allowed.
+
+    Target eligibility is read from the device tree (TODO_1.txt item 6): a
+    device's ``accepts`` list says which source types it will take, so adding a
+    device to ``server/devices.json`` is enough to change the conversion matrix.
+    """
+    try:
+        device = tree().by_id(target)
+    except KeyError:
         return f"unknown target {target!r}"
-    if target in _RHYTHM_TARGETS and source_type == "sample":
+    if not device.sink:
+        return f"{target!r} is not a sink"
+    accepts = device.accepts
+    if source_type in accepts:
+        return None
+    if source_type == "sample" and "rhythm" in accepts:
         return _REJECT_NO_SAMPLE
-    if target in _SAMPLE_TARGETS and source_type == "rhythm":
+    if source_type == "rhythm" and "sample" in accepts:
         return _REJECT_NO_RHYTHM
-    return None
+    return f"{target!r} does not accept {source_type}"
 
 
 def run_conversion(

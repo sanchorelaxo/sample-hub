@@ -13,6 +13,7 @@ Capability flags (TODO_1.txt items 1 + 4):
   * ``sink``          — the device can receive samples (write to it)
   * ``source``        — the device can serve samples (read from it)
   * ``is_flashable``  — changes need a firmware flash (Wave Bard, FX Wizard)
+  * ``accepts``       — the source types this sink will take ("sample", "rhythm")
 
 Sink-only  = sink and not source   (Spotykach, Wave Bard, FX Wizard)
 Source-only = source and not sink  (none today, but the model allows it)
@@ -41,6 +42,7 @@ class Device:
     sink: bool = True
     source: bool = False
     is_flashable: bool = False
+    accepts: tuple[str, ...] = ("sample",)
     params: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -50,6 +52,7 @@ class Device:
             "sink": self.sink,
             "source": self.source,
             "is_flashable": self.is_flashable,
+            "accepts": list(self.accepts),
             "params": self.params,
         }
 
@@ -99,12 +102,22 @@ def _parse_device(raw: dict) -> Device:
             _require(isinstance(raw[flag], bool), f"device {raw['id']!r}: '{flag}' must be a boolean")
     params = raw.get("params", {})
     _require(isinstance(params, dict), f"device {raw['id']!r}: 'params' must be an object")
+    accepts = raw.get("accepts")
+    if accepts is None:
+        accepts = ("sample",)
+    else:
+        msg = f"device {raw['id']!r}: 'accepts' must be a non-empty list of strings"
+        _require(isinstance(accepts, list), msg)
+        _require(bool(accepts), msg)
+        _require(all(isinstance(a, str) for a in accepts), msg)
+        accepts = tuple(accepts)
     return Device(
         id=raw["id"],
         label=label,
         sink=raw.get("sink", True),
         source=raw.get("source", False),
         is_flashable=raw.get("is_flashable", False),
+        accepts=accepts,
         params=dict(params),
     )
 
