@@ -41,6 +41,7 @@ SRC_FILES = [
     "src/panes.js",
     "src/dragdrop.js",
     "src/status.js",
+    "src/staging.js",
 ]
 
 
@@ -153,12 +154,13 @@ def test_vendor_addons_import_the_local_shim():
     assert "./three.core.js" in _specifiers(shim), "three.module.js lost its core import"
 
 
-def test_rack_order_matches_server_device_order():
-    from server.status import DEVICE_ORDER
-
+def test_client_derives_device_order_from_server():
+    """TODO_1.txt item 6: the client must not hardcode the rack. It reads the
+    device tree from GET /api/devices, and layout.js stays geometry-only."""
+    main = (CLIENT_DIR / "src/main.js").read_text()
+    assert "/api/devices" in main, "main.js must fetch the device tree"
     layout = (CLIENT_DIR / "src/layout.js").read_text()
-    ids = re.findall(r'id:\s*"([a-z0-9_]+)"', layout)
-    assert ids == list(DEVICE_ORDER)
+    assert not re.search(r'id:\s*"', layout), "layout.js must stay geometry-only (no device list)"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

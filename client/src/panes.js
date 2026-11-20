@@ -1,64 +1,60 @@
-// DOM overlay panes: a library pane plus one pane per instrument, positioned
-// over the rack plates. Each instrument pane carries a presence dot, a
-// transport readout, a drop zone and a job list (SPEC.md §5.1).
-import { INSTRUMENTS } from "./layout.js";
+// DOM overlay panes: one pane per instrument (no library pane — TODO_1.txt
+// item 3). A sink pane lists staged (pending) transfers and running jobs; a
+// source pane lists its draggable files (item 2). The presence readout is
+// shared by every pane.
 import { colorFor } from "./status.js";
 
-export function buildPanes(container) {
-  const library = document.createElement("section");
-  library.className = "pane library";
-  library.innerHTML = `
-    <h2 class="pane-label">Library</h2>
-    <ul class="library-list"></ul>
-    <p class="empty">nothing cached yet</p>`;
-  container.appendChild(library);
-
+export function buildPanes(container, devices) {
   const panes = new Map();
-  for (const instrument of INSTRUMENTS) {
+  for (const device of devices) {
     const pane = document.createElement("section");
     pane.className = "pane instrument";
-    pane.dataset.target = instrument.id;
+    pane.dataset.target = device.id;
+    pane.dataset.sink = device.sink ? "1" : "";
+    pane.dataset.source = device.source ? "1" : "";
+    pane.dataset.flashable = device.is_flashable ? "1" : "";
     pane.innerHTML = `
-      <h2 class="pane-label"><span class="dot red" data-role="dot"></span>${instrument.label}</h2>
+      <h2 class="pane-label"><span class="dot red" data-role="dot"></span>${device.label}</h2>
       <p class="detail" data-role="detail">—</p>
+      <ul class="source-list" data-role="source"></ul>
+      <p class="empty" data-role="source-empty" hidden>no files</p>
+      <ul class="pending" data-role="pending"></ul>
       <ul class="jobs" data-role="jobs"></ul>`;
     container.appendChild(pane);
-    panes.set(instrument.id, {
+    panes.set(device.id, {
       el: pane,
       dot: pane.querySelector('[data-role="dot"]'),
       detail: pane.querySelector('[data-role="detail"]'),
+      source: pane.querySelector('[data-role="source"]'),
+      sourceEmpty: pane.querySelector('[data-role="source-empty"]'),
+      pending: pane.querySelector('[data-role="pending"]'),
       jobs: pane.querySelector('[data-role="jobs"]'),
+      device,
     });
   }
-
-  return {
-    library,
-    libraryList: library.querySelector(".library-list"),
-    empty: library.querySelector(".empty"),
-    panes,
-  };
+  return { panes };
 }
 
-export function renderLibrary(handle, entries) {
-  const { libraryList, empty } = handle;
-  libraryList.textContent = "";
-  const items = [
-    ...(entries.samples || []).map((s) => ({ id: s.id, name: s.name, type: "sample" })),
-    ...(entries.rhythms || []).map((r) => ({ id: r.id, name: r.name, type: "rhythm" })),
-  ];
-  empty.hidden = items.length > 0;
-  for (const item of items) {
+export function renderSource(handle, deviceId, entries) {
+  const pane = handle.panes.get(deviceId);
+  if (!pane) return;
+  const list = pane.source;
+  list.textContent = "";
+  const items = entries || [];
+  pane.sourceEmpty.hidden = items.length !== 0;
+  for (const entry of items) {
     const li = document.createElement("li");
-    li.className = "library-item";
+    li.className = "source-item";
     li.draggable = true;
-    li.dataset.sourceId = item.id;
-    li.dataset.sourceType = item.type;
+    li.dataset.sourceDevice = deviceId;
+    li.dataset.sourceRef = entry.rel;
+    li.dataset.sourceType = entry.type || "sample";
     const badge = document.createElement("span");
-    badge.className = `badge ${item.type}`;
-    badge.textContent = item.type === "sample" ? "wav" : "rhythm";
+    badge.className = "badge sample";
+    badge.textContent = (entry.rel.split(".").pop() || "wav").toLowerCase();
     li.appendChild(badge);
-    li.appendChild(document.createTextNode(item.name));
-    libraryList.appendChild(li);
+    li.appendChild(document.createTextNode(entry.rel));
+    list.appendChild(li);
   }
 }
 

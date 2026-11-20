@@ -46,6 +46,7 @@ html, body {
 }
 
 .pane {
+  position: relative;
   pointer-events: auto;
   background: var(--pane);
   border: 1px solid var(--pane-border);
@@ -57,8 +58,6 @@ html, body {
 }
 
 .pane.instrument { flex: 1 1 0; max-width: 176px; }
-
-.pane.library { flex: 0 0 210px; }
 
 .pane-label {
   margin: 0 0 4px;
@@ -90,11 +89,15 @@ html, body {
   min-height: 1.4em;
 }
 
-/* ---- library list ----------------------------------------------------- */
+/* ---- source files & pending transfers -------------------------------- */
 
-.library-list { list-style: none; margin: 0; padding: 0; }
+.source-list, .pending, .jobs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 
-.library-item {
+.source-item, .pending-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -102,13 +105,23 @@ html, body {
   margin: 4px 0;
   border: 1px solid var(--pane-border);
   border-radius: 6px;
-  cursor: grab;
-  background: rgba(255, 255, 255, 0.03);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.library-item:active { cursor: grabbing; }
+
+.source-item {
+  cursor: grab;
+  background: rgba(255, 255, 255, 0.03);
+}
+.source-item:active { cursor: grabbing; }
+
+.pending-item {
+  background: rgba(74, 144, 217, 0.12);
+  border-color: rgba(74, 144, 217, 0.35);
+  font-size: 11px;
+  color: #9fc4ff;
+}
 
 .badge {
   font-size: 9px;
@@ -129,6 +142,19 @@ html, body {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.4);
 }
+.pane.instrument.illegal {
+  border-color: var(--red);
+}
+.pane.instrument.illegal::after {
+  content: "✗";
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: var(--red);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
 .pane.instrument.refused {
   border-color: var(--red);
   animation: shake 0.2s ease;
@@ -140,8 +166,6 @@ html, body {
   25% { transform: translateX(-3px); }
   75% { transform: translateX(3px); }
 }
-
-.jobs { list-style: none; margin: 0; padding: 0; }
 
 .job {
   display: flex;
@@ -179,8 +203,21 @@ html, body {
   pointer-events: none;
 }
 
+.stage-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .hint { color: var(--muted); font-size: 12px; }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions button,
 #camera-reset {
   pointer-events: auto;
   background: var(--pane);
@@ -191,4 +228,11 @@ html, body {
   font-size: 12px;
   cursor: pointer;
 }
+#apply {
+  background: rgba(46, 204, 113, 0.18);
+  border-color: rgba(46, 204, 113, 0.45);
+  color: var(--green);
+  font-weight: 600;
+}
+.actions button:hover,
 #camera-reset:hover { border-color: var(--accent); }

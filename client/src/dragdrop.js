@@ -1,120 +1,102 @@
-// HTML5 drag-and-drop: a library item dropped on an instrument pane submits
-// the source/target pair to POST /api/convert, then polls the job to
-// completion. The client mirrors the server's asset-type matrix for instant
-// inline refusal, but the server stays authoritative (HTTP 422, SPEC.md §6).
-import { INSTRUMENTS } from "./layout.js";
-import { addJob, settleJob, flashRefused } from "./panes.js";
-
-// Mirrors server/jobs.py: sample targets refuse rhythms, fx_wizard refuses
-// samples, and wave_bard accepts both.
-const SAMPLES_ONLY = new Set(["op1", "spotykach", "sp404"]);
-const RHYTHMS_ONLY = new Set(["fx_wizard"]);
+// HTML5 drag-and-drop between device sources and sinks (TODO_1.txt items 2/3).
+// A source file dropped on a legal sink is STAGED, not sent (item 5). Illegal
+// targets show a red ✗ and refuse the drop; the server stays authoritative on
+// asset-type legality (HTTP 422, SPEC.md §6).
+import { stage } from "./staging.js";
+import { flashRefused } from "./panes.js";
 
 const DROP_TYPE = "application/x-sample-hub";
-const DROP_TYPE_KIND = "application/x-sample-hub-type";
-const POLL_INTERVAL_MS = 500;
-const POLL_LIMIT = 600; // ~5 minutes before a job row gives up
 
-export function rejectReason(sourceType, target) {
-  if (RHYTHMS_ONLY.has(target) && sourceType === "sample") {
-    return "rhythms only — no sample input";
+function readDrag(event) {
+  const raw = event.dataTransfer.getData(DROP_TYPE);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-  if (SAMPLES_ONLY.has(target) && sourceType === "rhythm") {
-    return "samples only";
-  }
-  return null;
 }
 
-export function wireDragDrop(handle) {
-  const { panes, libraryList } = handle;
+// Mirrors server/jobs.py reject_reason, driven by the device tree's accepts
+// list rather than a hardcoded matrix (TODO_1.txt item 6).
+export function rejectReason(sourceType, device) {
+  if (!device.sink) return "not a sink";
+  const accepts = device.accepts || [];
+  if (accepts.includes(sourceType)) return null;
+  if (sourceType === "sample" && accepts.includes("rhythm")) {
+    return "rhythms only — no sample input";
+  }
+  if (sourceType === "rhythm" && accepts.includes("sample")) {
+    return "samples only";
+  }
+  return `${device.id} does not accept ${sourceType}`;
+}
 
-  libraryList.addEventListener("dragstart", (event) => {
-    const item = event.target.closest(".library-item");
-    if (!item) return;
-    event.dataTransfer.setData(DROP_TYPE, item.dataset.sourceId);
-    event.dataTransfer.setData(DROP_TYPE_KIND, item.dataset.sourceType);
-    event.dataTransfer.effectAllowed = "copy";
-  });
+export function wireDragDrop(handle, onChanged) {
+  for (const pane of handle.panes.values()) {
+    if (pane.device.source) {
+      pane.source.addEventListener("dragstart", (event) => {
+        const item = event.target.closest(".source-item");
+        if (!item) return;
+        event.dataTransfer.setData(
+          DROP_TYPE,
+          JSON.stringify({
+            sourceDevice: item.dataset.sourceDevice,
+            sourceRef: item.dataset.sourceRef,
+            sourceType: item.dataset.sourceType || "sample",
+          }),
+        );
+        event.dataTransfer.effectAllowed = "copy";
+      });
+    }
 
-  for (const instrument of INSTRUMENTS) {
-    const pane = panes.get(instrument.id);
+    if (!pane.device.sink) continue;
     const { el } = pane;
 
     el.addEventListener("dragover", (event) => {
       if (!event.dataTransfer.types.includes(DROP_TYPE)) return;
+      const data = readDrag(event);
+      if (!data) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
-      el.classList.add("drop-target");
+      const reason =
+        data.sourceDevice === pane.device.id
+          ? "same device"
+          : rejectReason(data.sourceType, pane.device);
+      if (reason) {
+        event.dataTransfer.dropEffect = "none";
+        el.classList.add("illegal");
+        el.classList.remove("drop-target");
+      } else {
+        event.dataTransfer.dropEffect = "copy";
+        el.classList.add("drop-target");
+        el.classList.remove("illegal");
+      }
     });
 
-    el.addEventListener("dragleave", () => el.classList.remove("drop-target"));
+    const clear = () => el.classList.remove("drop-target", "illegal");
+    el.addEventListener("dragleave", clear);
 
     el.addEventListener("drop", (event) => {
-      el.classList.remove("drop-target");
+      clear();
       if (!event.dataTransfer.types.includes(DROP_TYPE)) return;
       event.preventDefault();
-
-      const sourceId = event.dataTransfer.getData(DROP_TYPE);
-      const sourceType = event.dataTransfer.getData(DROP_TYPE_KIND);
-      if (!sourceId) return;
-
-      if (el.dataset.state !== "green") {
-        flashRefused(pane, "instrument not ready");
+      const data = readDrag(event);
+      if (!data) return;
+      if (data.sourceDevice === pane.device.id) {
+        flashRefused(pane, "same device");
         return;
       }
-      const reason = rejectReason(sourceType, instrument.id);
+      const reason = rejectReason(data.sourceType, pane.device);
       if (reason) {
         flashRefused(pane, reason);
         return;
       }
-      submitConvert(handle, sourceId, instrument.id, pane);
+      if (el.dataset.state !== "green") {
+        flashRefused(pane, "instrument not ready");
+        return;
+      }
+      stage(data.sourceDevice, data.sourceRef, data.sourceType, pane.device.id);
+      onChanged();
     });
   }
-}
-
-async function submitConvert(handle, sourceId, target, pane) {
-  let jobId;
-  try {
-    const res = await fetch("/api/convert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_id: sourceId, target }),
-    });
-    const payload = await res.json();
-    if (!res.ok) {
-      flashRefused(pane, payload.error || `convert refused (${res.status})`);
-      return;
-    }
-    jobId = payload.job_id;
-  } catch (err) {
-    flashRefused(pane, "server unreachable");
-    return;
-  }
-
-  const row = addJob(handle, target, jobId, `${target} · ${jobId}`);
-  await pollJob(jobId, row);
-}
-
-async function pollJob(jobId, row) {
-  for (let attempt = 0; attempt < POLL_LIMIT; attempt += 1) {
-    if (!row.isConnected) return;
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-    let state;
-    try {
-      const res = await fetch(`/api/jobs/${jobId}`);
-      state = await res.json();
-    } catch (err) {
-      settleJob(row, false, "server unreachable");
-      return;
-    }
-    if (state.status === "done") {
-      settleJob(row, true, state.result?.result?.rel || "done");
-      return;
-    }
-    if (state.status === "error") {
-      settleJob(row, false, state.error || "failed");
-      return;
-    }
-  }
-  settleJob(row, false, "timed out");
 }

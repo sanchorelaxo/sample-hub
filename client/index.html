@@ -11,8 +11,15 @@
     <canvas id="scene"></canvas>
     <div id="panes" class="panes" aria-label="instrument rack"></div>
     <div class="stage-bar">
-      <span class="hint">drag a library item onto an instrument pane · drag empty space to orbit · scroll to zoom</span>
-      <button id="camera-reset" type="button">reset view</button>
+      <span class="hint">drag a source file onto a sink pane · drag empty space to orbit · scroll to zoom</span>
+      <div class="stage-actions">
+        <div id="actions" class="actions" hidden>
+          <button id="apply" type="button">Apply</button>
+          <button id="cancel" type="button">Cancel</button>
+          <button id="undo" type="button">Undo</button>
+        </div>
+        <button id="camera-reset" type="button">reset view</button>
+      </div>
     </div>
   </div>
   <script type="module" src="src/main.js"></script>

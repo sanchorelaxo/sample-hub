@@ -1,15 +1,6 @@
-// Rack geometry and pane order. One number per instrument position, in
-// millimetres, so mesh code never hardcodes a position. The order is the
-// SPEC.md §5.1 pane order, left to right, and must stay in sync with
-// server/status.py DEVICE_ORDER (pinned by tests/test_client_shell.py).
-export const INSTRUMENTS = [
-  { id: "op1", label: "OP-1" },
-  { id: "spotykach", label: "Spotykach" },
-  { id: "wave_bard", label: "Wave Bard" },
-  { id: "sp404", label: "SP-404MK2" },
-  { id: "fx_wizard", label: "FX Wizard" },
-];
-
+// Rack geometry. Pure geometry: plate positions and pitch are derived from the
+// device count, which the client reads from GET /api/devices (server/devices.json).
+// No device list is hardcoded here (TODO_1.txt item 6).
 export const RACK = {
   plateWidth: 150, // mm, each instrument plate
   plateHeight: 92, // mm
@@ -23,11 +14,10 @@ export const RACK = {
 };
 
 const PITCH = RACK.plateWidth + RACK.gap;
-const TOTAL =
-  INSTRUMENTS.length * RACK.plateWidth + (INSTRUMENTS.length - 1) * RACK.gap;
 
-export function plateX(index) {
-  return index * PITCH - TOTAL / 2 + RACK.plateWidth / 2;
+export function plateX(index, count) {
+  const total = count * RACK.plateWidth + (count - 1) * RACK.gap;
+  return index * PITCH - total / 2 + RACK.plateWidth / 2;
 }
 
 export function plateY() {

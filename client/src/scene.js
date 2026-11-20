@@ -1,7 +1,8 @@
-// The 3D rack: five labelled plates standing on a shelf, each with a presence
-// dot on its face. Pure decoration — the drop targets are the DOM overlay
-// panes (panes.js), not these meshes (SPEC.md §5.1).
-import { INSTRUMENTS, RACK, plateX, plateY } from "./layout.js";
+// The 3D rack: labelled plates standing on a shelf, each with a presence dot
+// on its face. Pure decoration — the drop targets are the DOM overlay panes
+// (panes.js), not these meshes (SPEC.md §5.1). The plate list comes from the
+// device tree, so adding a device to server/devices.json extends the rack.
+import { RACK, plateX, plateY } from "./layout.js";
 
 function labelTexture(THREE, text) {
   const canvas = document.createElement("canvas");
@@ -21,12 +22,13 @@ function labelTexture(THREE, text) {
   return tex;
 }
 
-export function buildRack(THREE) {
+export function buildRack(THREE, devices) {
   const group = new THREE.Group();
   const dots = new Map();
+  const count = devices.length;
 
   const shelfWidth =
-    INSTRUMENTS.length * RACK.plateWidth + (INSTRUMENTS.length + 1) * RACK.gap;
+    count * RACK.plateWidth + (count + 1) * RACK.gap;
   const shelf = new THREE.Mesh(
     new THREE.BoxGeometry(shelfWidth, RACK.shelfThickness, RACK.shelfDepth),
     new THREE.MeshStandardMaterial({ color: 0x20262f, roughness: 0.6, metalness: 0.15 }),
@@ -36,8 +38,8 @@ export function buildRack(THREE) {
   shelf.receiveShadow = true;
   group.add(shelf);
 
-  INSTRUMENTS.forEach((instrument, index) => {
-    const x = plateX(index);
+  devices.forEach((device, index) => {
+    const x = plateX(index, count);
     const y = plateY();
 
     const plate = new THREE.Mesh(
@@ -51,7 +53,7 @@ export function buildRack(THREE) {
 
     const label = new THREE.Mesh(
       new THREE.PlaneGeometry(RACK.plateWidth * 0.72, RACK.labelTextHeight),
-      new THREE.MeshBasicMaterial({ map: labelTexture(THREE, instrument.label), toneMapped: false }),
+      new THREE.MeshBasicMaterial({ map: labelTexture(THREE, device.label), toneMapped: false }),
     );
     label.position.set(x, y + RACK.plateHeight * 0.18, RACK.plateDepth / 2 + 0.5);
     group.add(label);
@@ -66,7 +68,7 @@ export function buildRack(THREE) {
       RACK.plateDepth / 2 + 0.6,
     );
     group.add(dot);
-    dots.set(instrument.id, dot);
+    dots.set(device.id, dot);
   });
 
   return { group, dots };
