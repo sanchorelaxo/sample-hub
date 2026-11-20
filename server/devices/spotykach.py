@@ -6,9 +6,9 @@ those bytes against that format, then hands them to the device through the
 existing transport (``tools/sk_usb.py`` + ``tools/sk_install.py``).
 
 No singleton: every ``write_sample`` opens its own transport and closes it, so
-parallel jobs on other instruments never share a link. The USB device is
-preferred; the SD card (``SK/<tape>/<slot>.WAV``) is the fallback, exactly as
-``open_transport`` already does.
+parallel jobs on other instruments never share a link. The transport is USB
+transfer only: the unit's SD card is never mounted into the computer, so there
+is no card-fallback path. (USB transfer is a different mode from USB MIDI.)
 
 The transport source dir is resolved from the sibling ``spottytube-ext`` repo,
 overridable with ``SPOTTYTUBE_TOOLS`` (mirrors ``sk_usb``'s own ``SPOTTY_USB_PORT``
@@ -60,8 +60,8 @@ def validate(data: bytes, info=None) -> list[str]:
     return check_uploadable(data, info)
 
 
-def write_sample(data, tape, slot, preferred="auto", card_root=None, archive_dir=None):
-    """Upload canonical WAV bytes into a Spotykach slot (USB or card).
+def write_sample(data, tape, slot, preferred="usb", card_root=None, archive_dir=None):
+    """Upload canonical WAV bytes into a Spotykach slot (USB transfer transport).
 
     Validates the bytes against the device format and the tape/slot bounds
     *before* opening any transport, then writes through the existing transport
