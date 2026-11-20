@@ -1,0 +1,19 @@
+a few changes are needed:
+
+for devices, we have to distinguish between sink-only (cant get samples from) source-only (cant get samples to) and si
+nk-source options (bi-directional): wave bard and fx wizard are sink-only, spotykach is sink only, sp404 card is sink-
+source (export is source dir, import is sink dir), op1 is also both (sink-source).
+
+as in op1-web, sources have to show their content and each file be draggable
+
+eliminate library. drag-n-drop will work only between sinks and sources (will show red x when dragging onto illegal sink/source xfer, not allowing the drag-n-drop)
+
+isFlashable boolean: if true (like wave bard or fx wizard), changes to device would require a firmware update
+
+in fact, client side architecture should be changed for showing staged files xfers (after user is done dragging files acros various devices), the pending changes shuld be listed in the sink's card, and and Apply button appear
+s in lower right as soon as changes are to be made (if isFlashable devices also have pending changes, button label changes to 'Apply (and flash)' . Cancel button unstages everything, Undo button only unstages last change
+
+i want to be able to add devices by adding to a json tree. externalize them and necessary params and also mov
+e any global or app params/vars/flags into the tree too
+
+merge Spotykach USB-MIDI presence detection changes now, will debug later
