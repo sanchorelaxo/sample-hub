@@ -1,0 +1,6 @@
+{
+  "name": "sample-hub-client",
+  "private": true,
+  "type": "module",
+  "description": "three.js rack client for the sample-hub workstation. No build step, no dependencies."
+}

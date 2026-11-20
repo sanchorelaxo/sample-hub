@@ -82,9 +82,11 @@ def make_server(
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_bytes(self, status: int, content_type: str, body: bytes) -> None:
+        def _send_bytes(self, status: int, content_type: str, body: bytes, extra_headers=None) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            for key, value in (extra_headers or {}).items():
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -118,7 +120,10 @@ def make_server(
                 return
             content_type, _ = mimetypes.guess_type(str(candidate))
             self._send_bytes(
-                200, content_type or "application/octet-stream", candidate.read_bytes()
+                200,
+                content_type or "application/octet-stream",
+                candidate.read_bytes(),
+                {"Cache-Control": "no-store"},
             )
 
         def _handle_health(self) -> None:

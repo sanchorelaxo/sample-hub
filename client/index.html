@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sample Hub</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="stage">
+    <canvas id="scene"></canvas>
+    <div id="panes" class="panes" aria-label="instrument rack"></div>
+    <div class="stage-bar">
+      <span class="hint">drag a library item onto an instrument pane · drag empty space to orbit · scroll to zoom</span>
+      <button id="camera-reset" type="button">reset view</button>
+    </div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
