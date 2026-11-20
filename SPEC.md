@@ -227,6 +227,14 @@ the backend or the conversion matrix.
 The dot re-checks every 20 s, same cadence as the `spottytube` widget. A drop on
 a red pane is refused with the reason, never queued blindly.
 
+**Auto-mount.** A removable volume that is visible but unmounted is not left
+red. On each poll the backend auto-mounts a detected OP-1 disk or SD card via
+`udisksctl mount -b` (no sudo, authorized by the session polkit agent), so a
+card that is inserted, ejected, and re-inserted becomes usable on the next poll
+with no manual step. A device that refuses to mount reads amber with a
+`udisksctl mount -b <device>` hint to run by hand; a failed mount is retried at
+most once per 10 s window.
+
 ### Drag-and-drop semantics
 
 - **Draggable sources:** Library entries (samples and rhythms); OP-1 disk
@@ -336,7 +344,9 @@ existing projects' test style.
 7. **FX Wizard stager** — rhythm pattern + step count → firmware draft, same
    "generate firmware" state as Wave Bard.
 8. **Status probe** — presence/transport detection per instrument (mount,
-   `/dev/ttyACM*`, card, hub check for SP-404).
+   `/dev/ttyACM*`, card, hub check for SP-404), plus auto-mount of a visible
+   but unmounted OP-1 disk / SD card via `udisksctl` so re-inserted devices are
+   usable on the next poll.
 9. **Server + three.js rack client** — the `three` rack scene, DOM overlay
    panes, drag/drop, job queue, presence dots. No per-instrument 3D models yet
    (that is the next phase, §5.1).

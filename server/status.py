@@ -4,19 +4,28 @@ SPEC.md §5.1 wants a presence dot on every pane before a drop is allowed:
 green = the instrument is present and its transport is usable now; amber =
 present but blocked on a user step (needs a mount, a flash, a direct port);
 red = absent. The probe reads only sysfs and /proc/mounts, so it never needs
-the device writers imported and never touches a live unit unless a transport
-is genuinely there.
+the device writers imported.
+
+By default a probe is read-only: it reports what is mounted but does not
+mount anything. Pass ``mounter`` to auto-mount a visible-but-unmounted OP-1
+or SD card on the same pass, so a card that is inserted, ejected, and
+re-inserted becomes usable on the next poll instead of waiting for a human to
+run udisksctl by hand.
 
 Every sysfs root is an explicit argument so the real-device tests and this
-module share one read-only entry point and unit tests can point it at a
-synthetic tree instead of the machine.
+module share one entry point and unit tests can point it at a synthetic tree
+instead of the machine.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -46,6 +55,18 @@ HUB_CLASS = "09"
 # bare ttyACM match is not enough: match the Spotykach's VID/PID instead.
 SPOTYKACH_VENDOR = 0x0483
 SPOTYKACH_PRODUCT = 0x5740
+
+# How long to wait between mount attempts on the same device. The status
+# endpoint polls often, so without a throttle a card that cannot mount would
+# hammer udisksctl on every poll.
+MOUNT_RETRY_SECONDS = 10.0
+
+# A mounter takes a device node like "/dev/sda" or "/dev/mmcblk0p1" and returns
+# the mount point it landed at, or None when the mount was refused or failed.
+Mounter = Callable[[str], str | None]
+
+_mounter_lock = threading.Lock()
+_last_mount_attempt: dict[str, float] = {}
 
 
 @dataclass(frozen=True)
@@ -117,20 +138,89 @@ def _is_op1(block: dict) -> bool:
     return "teenage" in block["vendor"].lower() and "op-1" in block["model"].lower()
 
 
-def _probe_op1(block_dir: Path, mounts_text: str) -> DeviceStatus:
+def _mount_targets(block_dir: Path, device_name: str) -> list[str]:
+    """Device node(s) to mount for a block device: its partitions, or itself.
+
+    The OP-1 formats the whole device (no partition table), so /dev/sda is the
+    volume. An SD card is /dev/mmcblk0 with a /dev/mmcblk0p1 partition. Return
+    the partition nodes when they exist, otherwise the raw device.
+    """
+    device_dir = block_dir / device_name
+    partitions: list[str] = []
+    if device_dir.is_dir():
+        for entry in sorted(device_dir.iterdir()):
+            if entry.is_dir() and (entry / "partition").is_file():
+                partitions.append(entry.name)
+    if partitions:
+        return [f"/dev/{name}" for name in partitions]
+    return [f"/dev/{device_name}"]
+
+
+def _udisksctl_mount(device_path: str) -> str | None:
+    """Mount a block device through udisks2 and return its mount point.
+
+    udisksctl asks the session polkit agent for authorization, so it runs as
+    the logged-in user with no sudo. Return None on failure (unmountable
+    filesystem, no polkit agent, device vanished); callers turn that into an
+    amber hint rather than raising.
+    """
+    try:
+        result = subprocess.run(
+            ["udisksctl", "mount", "-b", device_path],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = re.search(r"Mounted .* at (\S+)", result.stdout)
+    if not match:
+        return None
+    return match.group(1).rstrip(".")
+
+
+def _try_mount(device_path: str, mounter: Mounter, now: Callable[[], float]) -> str | None:
+    """Mount a device at most once per retry window; None when throttled/failed."""
+    with _mounter_lock:
+        last = _last_mount_attempt.get(device_path)
+        if last is not None and now() - last < MOUNT_RETRY_SECONDS:
+            return None
+        _last_mount_attempt[device_path] = now()
+    return mounter(device_path)
+
+
+def _probe_op1(
+    block_dir: Path, mounts_text: str, mounter: Mounter | None, now: Callable[[], float]
+) -> DeviceStatus:
     for block in _block_devices(block_dir):
         if not _is_op1(block):
             continue
         mount = _mount_for(mounts_text, block["name"])
         if mount:
             return DeviceStatus("op1", LABELS["op1"], "disk", GREEN, True, mount)
+        if mounter is None:
+            return DeviceStatus(
+                "op1",
+                LABELS["op1"],
+                "disk",
+                AMBER,
+                True,
+                f"detected /dev/{block['name']}, not mounted",
+            )
+        for target in _mount_targets(block_dir, block["name"]):
+            mount = _try_mount(target, mounter, now)
+            if mount:
+                return DeviceStatus("op1", LABELS["op1"], "disk", GREEN, True, mount)
         return DeviceStatus(
             "op1",
             LABELS["op1"],
             "disk",
             AMBER,
             True,
-            f"detected /dev/{block['name']}, not mounted",
+            f"detected /dev/{block['name']}, auto-mount failed — "
+            f"run: udisksctl mount -b /dev/{block['name']}",
         )
     return DeviceStatus("op1", LABELS["op1"], "disk", RED, False, "no OP-1 attached")
 
@@ -188,7 +278,9 @@ def _on_usb_hub(block_dir: Path, device_name: str) -> bool:
     return False
 
 
-def _probe_sp404(block_dir: Path, mounts_text: str) -> DeviceStatus:
+def _probe_sp404(
+    block_dir: Path, mounts_text: str, mounter: Mounter | None, now: Callable[[], float]
+) -> DeviceStatus:
     # The MK2's SD is read through a host card reader, not USB mass storage, so
     # presence is the card's SP-404 signature: a top-level IMPORT/ folder. That
     # keeps a plain media SD card (mounted, but no IMPORT/) from reading green.
@@ -199,6 +291,11 @@ def _probe_sp404(block_dir: Path, mounts_text: str) -> DeviceStatus:
         if not is_sd_card:
             continue
         mount = _mount_for(mounts_text, block["name"])
+        if not mount and mounter is not None:
+            for target in _mount_targets(block_dir, block["name"]):
+                mount = _try_mount(target, mounter, now)
+                if mount:
+                    break
         if not mount or not (Path(mount) / "IMPORT").is_dir():
             continue
         if _on_usb_hub(block_dir, block["name"]):
@@ -246,21 +343,30 @@ def probe(
     usb_dir: Path | str = "/sys/bus/usb/devices",
     mounts_path: Path | str = "/proc/mounts",
     staging_dir: Path | str | None = None,
+    mounter: Mounter | None = None,
+    now: Callable[[], float] | None = None,
 ) -> list[DeviceStatus]:
-    """One pass over the live hardware (or an injected tree) — read-only."""
+    """One pass over the live hardware (or an injected tree).
+
+    With no ``mounter`` this is read-only detection. Pass ``mounter`` (and
+    ``now`` for deterministic tests) to auto-mount visible-but-unmounted OP-1
+    and SD-card volumes, so a freshly inserted device is usable on the next
+    poll rather than waiting for a manual udisksctl.
+    """
     block = Path(block_dir)
     tty = Path(tty_dir)
     usb = Path(usb_dir)
     mounts = Path(mounts_path)
     staging = Path(staging_dir) if staging_dir is not None else default_staging_dir()
+    clock = now if now is not None else time.monotonic
 
     mounts_text = mounts.read_text() if mounts.is_file() else ""
 
     results = {
-        "op1": _probe_op1(block, mounts_text),
+        "op1": _probe_op1(block, mounts_text, mounter, clock),
         "spotykach": _probe_spotykach(tty),
         "wave_bard": _probe_staged("wave_bard", staging),
-        "sp404": _probe_sp404(block, mounts_text),
+        "sp404": _probe_sp404(block, mounts_text, mounter, clock),
         "fx_wizard": _probe_staged("fx_wizard", staging),
     }
     return [results[device_id] for device_id in DEVICE_ORDER]
@@ -272,9 +378,14 @@ def status_payload(
     usb_dir: Path | str = "/sys/bus/usb/devices",
     mounts_path: Path | str = "/proc/mounts",
     staging_dir: Path | str | None = None,
+    mounter: Mounter | None = None,
+    now: Callable[[], float] | None = None,
 ) -> dict:
     """The JSON body for GET /api/status: an ordered device list plus a stamp."""
     return {
-        "devices": [d.to_dict() for d in probe(block_dir, tty_dir, usb_dir, mounts_path, staging_dir)],
+        "devices": [
+            d.to_dict()
+            for d in probe(block_dir, tty_dir, usb_dir, mounts_path, staging_dir, mounter, now)
+        ],
         "generated_at": time.time(),
     }
