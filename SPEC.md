@@ -221,19 +221,29 @@ the backend or the conversion matrix.
 
 - **green** — device present and its transport usable.
 - **red** — absent, or transport unusable (no mount, no `/dev/ttyACM*`, no card).
-- **amber** — present but blocked on a user step (Wave Bard / FX Wizard "ready
-  to flash", SP-404 "replug direct — on hub").
+- **amber** — present but blocked on a user step (Wave Bard / FX Wizard draft not
+  staged, or no board in update mode; SP-404 "replug direct — on hub").
 
 The dot re-checks every 20 s, same cadence as the `spottytube` widget. A drop on
 a red pane is refused with the reason, never queued blindly.
 
 **Auto-mount.** A removable volume that is visible but unmounted is not left
-red. On each poll the backend auto-mounts a detected OP-1 disk or SD card via
-`udisksctl mount -b` (no sudo, authorized by the session polkit agent), so a
-card that is inserted, ejected, and re-inserted becomes usable on the next poll
-with no manual step. A device that refuses to mount reads amber with a
-`udisksctl mount -b <device>` hint to run by hand; a failed mount is retried at
-most once per 10 s window.
+red. On each poll the backend auto-mounts a detected OP-1 disk, SD card, or
+RPI-RP2 update-mode volume via `udisksctl mount -b` (no sudo, authorized by
+the session polkit agent), so a card that is inserted, ejected, and re-inserted
+becomes usable on the next poll with no manual step. A device that refuses to
+mount reads amber with a `udisksctl mount -b <device>` hint to run by hand; a
+failed mount is retried at most once per 10 s window.
+
+**Wave Bard and FX Wizard are one board.** Both are the same RP2040 (Bastl
+Kastle 2); in update mode each mounts as an identical RPI-RP2 volume with the
+same VID/PID (`2e8a:0003`) and the same USB serial, so no hardware signal tells
+a Wave Bard from an FX Wizard. Bastl's own loaders never detect either — they
+just generate a `.uf2` for the user to copy onto whatever board is in update
+mode. The probe therefore treats every board in update mode as a shared "ready
+to flash" signal and auto-mounts each RPI-RP2 volume (two at once mount as
+`RPI-RP2` and `RPI-RP21`). A pane goes green only when its draft is staged
+*and* a board is actually in update mode to receive the flash.
 
 ### Drag-and-drop semantics
 
@@ -344,8 +354,9 @@ existing projects' test style.
 7. **FX Wizard stager** — rhythm pattern + step count → firmware draft, same
    "generate firmware" state as Wave Bard.
 8. **Status probe** — presence/transport detection per instrument (mount,
-   `/dev/ttyACM*`, card, hub check for SP-404), plus auto-mount of a visible
-   but unmounted OP-1 disk / SD card via `udisksctl` so re-inserted devices are
+   `/dev/ttyACM*`, card, hub check for SP-404, RPI-RP2 update-mode detection
+   for Wave Bard / FX Wizard), plus auto-mount of a visible but unmounted OP-1
+   disk / SD card / RPI-RP2 volume via `udisksctl` so re-inserted devices are
    usable on the next poll.
 9. **Server + three.js rack client** — the `three` rack scene, DOM overlay
    panes, drag/drop, job queue, presence dots. No per-instrument 3D models yet

@@ -50,6 +50,15 @@ def make_tty_acm(tty: Path, usb: Path, name: str, vendor: str, product: str) -> 
     return tty_entry
 
 
+def make_rp2_boot(block: Path, name: str = "sdb") -> Path:
+    """An RP2040 in UF2 update mode: vendor RPI, model RP2, one partition."""
+    make_block(block, name, vendor="RPI", model="RP2", removable=True)
+    partition = block / name / f"{name}1"
+    partition.mkdir()
+    (partition / "partition").write_text("1")
+    return block / name
+
+
 def empty_world(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
     block = tmp_path / "block"
     tty = tmp_path / "tty"
@@ -230,7 +239,7 @@ def test_wave_bard_amber_when_draft_staged(tmp_path):
     result = probe((block, tty, usb, mounts, staging))
     assert result["wave_bard"].state == "amber"
     assert result["wave_bard"].present is True
-    assert "ready to flash" in result["wave_bard"].detail
+    assert "connect" in result["wave_bard"].detail
 
 
 def test_fx_wizard_red_when_no_draft(tmp_path):
@@ -248,6 +257,97 @@ def test_fx_wizard_amber_when_draft_staged(tmp_path):
     result = probe((block, tty, usb, mounts, staging))
     assert result["fx_wizard"].state == "amber"
     assert result["fx_wizard"].present is True
+
+
+def test_rp2_update_mode_no_draft_marks_both_amber_present(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sdb")
+    mount_point = tmp_path / "RPI-RP2"
+    mount_point.mkdir()
+    make_mounts(tmp_path, "/dev/sdb1", mount_point)
+    result = probe((block, tty, usb, mounts, staging))
+    for pane in ("wave_bard", "fx_wizard"):
+        assert result[pane].state == "amber"
+        assert result[pane].present is True
+        assert "update mode" in result[pane].detail
+
+
+def test_wave_bard_green_when_draft_and_rp2_in_update_mode(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sdb")
+    mount_point = tmp_path / "RPI-RP2"
+    mount_point.mkdir()
+    make_mounts(tmp_path, "/dev/sdb1", mount_point)
+    wave_bard = staging / "wave_bard"
+    wave_bard.mkdir(parents=True)
+    (wave_bard / "manifest.json").write_text(json.dumps({"state": "ready_to_flash"}))
+    result = probe((block, tty, usb, mounts, staging))
+    assert result["wave_bard"].state == "green"
+    assert result["wave_bard"].present is True
+    assert "ready to flash" in result["wave_bard"].detail
+    assert "update mode" in result["wave_bard"].detail
+
+
+def test_rp2_auto_mounts_when_unmounted(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sdb")
+    mount_point = tmp_path / "RPI-RP2"
+    mount_point.mkdir()
+    mounter, calls = recording_mounter(mount_point=str(mount_point))
+    result = probe((block, tty, usb, mounts, staging), mounter=mounter)
+    assert calls == ["/dev/sdb1"]
+    assert result["wave_bard"].present is True
+    assert "RPI-RP2" in result["wave_bard"].detail
+
+
+def test_rp2_two_devices_both_auto_mount(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sda")
+    make_rp2_boot(block, "sdb")
+    mounter, calls = recording_mounter(mount_point="/run/media/rjodouin/RPI-RP2")
+    probe((block, tty, usb, mounts, staging), mounter=mounter)
+    assert calls == ["/dev/sda1", "/dev/sdb1"]
+
+
+def test_two_rp2_boards_list_both_mounts_in_detail(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sda")
+    make_rp2_boot(block, "sdb")
+    rp2 = tmp_path / "RPI-RP2"
+    rp21 = tmp_path / "RPI-RP21"
+    rp2.mkdir()
+    rp21.mkdir()
+    mounts.write_text(f"/dev/sda1 {rp21} vfat rw 0 0\n/dev/sdb1 {rp2} vfat rw 0 0\n")
+    result = probe((block, tty, usb, mounts, staging))
+    detail = result["wave_bard"].detail
+    assert "2 Kastle 2" in detail
+    assert str(rp2) in detail
+    assert str(rp21) in detail
+
+
+def test_rp2_already_mounted_is_not_remounted(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sdb")
+    mount_point = tmp_path / "RPI-RP2"
+    mount_point.mkdir()
+    make_mounts(tmp_path, "/dev/sdb1", mount_point)
+
+    def explode(device_path):
+        raise AssertionError(f"must not mount an already-mounted device: {device_path}")
+
+    result = probe((block, tty, usb, mounts, staging), mounter=explode)
+    assert result["wave_bard"].present is True
+
+
+def test_rp2_is_not_op1_or_sp404(tmp_path):
+    block, tty, usb, mounts, staging = empty_world(tmp_path)
+    make_rp2_boot(block, "sdb")
+    mount_point = tmp_path / "RPI-RP2"
+    mount_point.mkdir()
+    make_mounts(tmp_path, "/dev/sdb1", mount_point)
+    result = probe((block, tty, usb, mounts, staging))
+    assert result["op1"].state == "red"
+    assert result["sp404"].state == "red"
 
 
 def test_status_payload_serializes_devices(tmp_path):

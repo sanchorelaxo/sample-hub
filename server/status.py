@@ -138,6 +138,16 @@ def _is_op1(block: dict) -> bool:
     return "teenage" in block["vendor"].lower() and "op-1" in block["model"].lower()
 
 
+def _is_rp2_boot(block: dict) -> bool:
+    """An RP2040 in its UF2 bootloader reports vendor RPI and model RP2.
+
+    A Wave Bard and an FX Wizard are the same RP2040 board, and in update mode
+    both present this identical identity, so this is a platform check, not a
+    per-instrument one.
+    """
+    return "rpi" in block["vendor"].lower() and "rp2" in block["model"].lower()
+
+
 def _mount_targets(block_dir: Path, device_name: str) -> list[str]:
     """Device node(s) to mount for a block device: its partitions, or itself.
 
@@ -189,6 +199,45 @@ def _try_mount(device_path: str, mounter: Mounter, now: Callable[[], float]) -> 
             return None
         _last_mount_attempt[device_path] = now()
     return mounter(device_path)
+
+
+def _probe_update_mode_devices(
+    block_dir: Path, mounts_text: str, mounter: Mounter | None, now: Callable[[], float]
+) -> list[dict]:
+    """Kastle 2 (RP2040) devices currently in UF2 update mode, auto-mounted as needed.
+
+    Update mode is the moment a board can receive a .uf2, so this is the "ready
+    to flash" hardware signal for the Wave Bard and FX Wizard panes. Several
+    boards may be attached at once; each is a plain RPI-RP2 volume with no
+    per-unit identity, so callers treat the whole list as a shared pool rather
+    than "the Wave Bard's board" vs "the FX Wizard's board".
+    """
+    update_mode_devices: list[dict] = []
+    for block in _block_devices(block_dir):
+        if not _is_rp2_boot(block):
+            continue
+        mount = _mount_for(mounts_text, block["name"])
+        if not mount and mounter is not None:
+            for target in _mount_targets(block_dir, block["name"]):
+                mount = _try_mount(target, mounter, now)
+                if mount:
+                    break
+        update_mode_devices.append({"name": block["name"], "mount": mount})
+    return update_mode_devices
+
+
+def _update_mode_phrase(update_mode_devices: list[dict]) -> str | None:
+    """A human phrase for the boards currently in UF2 update mode, or None."""
+    if not update_mode_devices:
+        return None
+    count = len(update_mode_devices)
+    mounts = [d["mount"] for d in update_mode_devices if d["mount"]]
+    if count == 1:
+        where = f" at {mounts[0]}" if mounts else ""
+        return f"Kastle 2 in update mode{where}"
+    if mounts and len(mounts) == count:
+        return f"{count} Kastle 2 boards in update mode ({', '.join(mounts)})"
+    return f"{count} Kastle 2 boards in update mode"
 
 
 def _probe_op1(
@@ -285,7 +334,7 @@ def _probe_sp404(
     # presence is the card's SP-404 signature: a top-level IMPORT/ folder. That
     # keeps a plain media SD card (mounted, but no IMPORT/) from reading green.
     for block in _block_devices(block_dir):
-        if _is_op1(block):
+        if _is_op1(block) or _is_rp2_boot(block):
             continue
         is_sd_card = block["name"].startswith("mmcblk") or block["removable"]
         if not is_sd_card:
@@ -320,17 +369,43 @@ def _probe_sp404(
     )
 
 
-def _probe_staged(device_id: str, staging_dir: Path) -> DeviceStatus:
-    """A staged-firmware instrument is amber only while a draft waits to flash."""
+def _probe_staged(device_id: str, staging_dir: Path, update_mode_devices: list[dict]) -> DeviceStatus:
+    """A staged-firmware instrument keys on both its draft and a board in update mode.
+
+    Wave Bard and FX Wizard are the same RP2040 board; in update mode both mount
+    as an identical RPI-RP2 volume, so a board in update mode is a shared signal,
+    not a per-pane one. The pane goes green only when its draft is ready AND a
+    board is actually in update mode to receive the flash.
+    """
     manifest = staging_dir / device_id / "manifest.json"
+    staged_state = None
     if manifest.is_file():
         try:
-            state = json.loads(manifest.read_text()).get("state")
+            staged_state = json.loads(manifest.read_text()).get("state")
         except (OSError, json.JSONDecodeError):
-            state = None
-        detail = "ready to flash" if state == READY_TO_FLASH else "draft staged"
+            staged_state = None
+
+    board_count = len(update_mode_devices)
+    phrase = _update_mode_phrase(update_mode_devices)
+
+    if staged_state == READY_TO_FLASH and board_count:
         return DeviceStatus(
-            device_id, LABELS[device_id], "staged_firmware", AMBER, True, detail
+            device_id, LABELS[device_id], "staged_firmware", GREEN, True,
+            f"ready to flash — {phrase}",
+        )
+    if staged_state == READY_TO_FLASH:
+        return DeviceStatus(
+            device_id, LABELS[device_id], "staged_firmware", AMBER, True,
+            "draft staged — connect a Kastle 2 in update mode",
+        )
+    if staged_state is not None:
+        return DeviceStatus(
+            device_id, LABELS[device_id], "staged_firmware", AMBER, True, "draft staged",
+        )
+    if board_count:
+        return DeviceStatus(
+            device_id, LABELS[device_id], "staged_firmware", AMBER, True,
+            f"{phrase} — no draft staged",
         )
     return DeviceStatus(
         device_id, LABELS[device_id], "staged_firmware", RED, False, "no draft staged"
@@ -362,12 +437,14 @@ def probe(
 
     mounts_text = mounts.read_text() if mounts.is_file() else ""
 
+    update_mode_devices = _probe_update_mode_devices(block, mounts_text, mounter, clock)
+
     results = {
         "op1": _probe_op1(block, mounts_text, mounter, clock),
         "spotykach": _probe_spotykach(tty),
-        "wave_bard": _probe_staged("wave_bard", staging),
+        "wave_bard": _probe_staged("wave_bard", staging, update_mode_devices),
         "sp404": _probe_sp404(block, mounts_text, mounter, clock),
-        "fx_wizard": _probe_staged("fx_wizard", staging),
+        "fx_wizard": _probe_staged("fx_wizard", staging, update_mode_devices),
     }
     return [results[device_id] for device_id in DEVICE_ORDER]
 
