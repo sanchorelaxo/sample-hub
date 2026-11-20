@@ -48,6 +48,53 @@ def _ffmpeg() -> str:
     return shutil.which("ffmpeg") or "ffmpeg"
 
 
+def _decode_cmd(src: Path) -> list[str]:
+    """The ffmpeg invocation that decodes any container to raw float32 PCM."""
+    return [
+        _ffmpeg(),
+        "-i", str(src),
+        "-f", "f32le",
+        "-acodec", "pcm_f32le",
+        "-ar", str(CANONICAL_RATE),
+        "-ac", str(CANONICAL_CHANNELS),
+        "-",
+    ]
+
+
+def _decode(src: Path) -> bytes:
+    """Run ``_decode_cmd`` and return the raw interleaved float32 PCM on stdout."""
+    result = subprocess.run(_decode_cmd(src), capture_output=True)
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip()
+        raise NormalizeError(f"ffmpeg failed for {src.name}: {detail[-400:]}")
+    return result.stdout
+
+
+def _float_wav_bytes(pcm: bytes) -> bytes:
+    """Wrap raw float32 PCM in a canonical IEEE-float WAV header (tag 0x0003)."""
+    bits = 32
+    block_align = CANONICAL_CHANNELS * bits // 8
+    byte_rate = CANONICAL_RATE * block_align
+    fmt_len = 16
+    data_len = len(pcm)
+    riff_size = 4 + (8 + fmt_len) + (8 + data_len)
+    header = bytearray()
+    header += b"RIFF"
+    header += struct.pack("<I", riff_size)
+    header += b"WAVE"
+    header += b"fmt "
+    header += struct.pack("<I", fmt_len)
+    header += struct.pack("<H", FLOAT_FORMAT_TAG)
+    header += struct.pack("<H", CANONICAL_CHANNELS)
+    header += struct.pack("<I", CANONICAL_RATE)
+    header += struct.pack("<I", byte_rate)
+    header += struct.pack("<H", block_align)
+    header += struct.pack("<H", bits)
+    header += b"data"
+    header += struct.pack("<I", data_len)
+    return bytes(header) + pcm
+
+
 def normalize(src: Path | str, dst: Path | str) -> Path:
     """Normalize ``src`` to the canonical 48 kHz stereo float32 WAV at ``dst``.
 
@@ -58,46 +105,23 @@ def normalize(src: Path | str, dst: Path | str) -> Path:
     """
     src, dst = Path(src), Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        _ffmpeg(),
-        "-i", str(src),
-        "-f", "f32le",
-        "-acodec", "pcm_f32le",
-        "-ar", str(CANONICAL_RATE),
-        "-ac", str(CANONICAL_CHANNELS),
-        "-",
-    ]
-    result = subprocess.run(cmd, capture_output=True)
-    if result.returncode != 0:
-        detail = result.stderr.decode(errors="replace").strip()
-        raise NormalizeError(f"ffmpeg failed for {src.name}: {detail[-400:]}")
-    _write_float_wav(dst, result.stdout)
+    _write_float_wav(dst, _decode(src))
     return dst
+
+
+def normalize_to_bytes(src: Path | str) -> bytes:
+    """Decode ``src`` to canonical 48 kHz stereo float32 WAV bytes in memory.
+
+    Same ffmpeg invocation as ``normalize`` but returns the WAV bytes instead of
+    writing a file, so a device source file (OP-1 AIFC, SP-404 export) can be
+    fed straight into the convert matrix with no temp file on disk.
+    """
+    return _float_wav_bytes(_decode(Path(src)))
 
 
 def _write_float_wav(path: Path, pcm: bytes) -> None:
     """Write a canonical IEEE-float WAV (format tag 0x0003, 16-byte fmt)."""
-    bits = 32
-    block_align = CANONICAL_CHANNELS * bits // 8
-    byte_rate = CANONICAL_RATE * block_align
-    fmt_len = 16
-    data_len = len(pcm)
-    riff_size = 4 + (8 + fmt_len) + (8 + data_len)
-    with open(path, "wb") as f:
-        f.write(b"RIFF")
-        f.write(struct.pack("<I", riff_size))
-        f.write(b"WAVE")
-        f.write(b"fmt ")
-        f.write(struct.pack("<I", fmt_len))
-        f.write(struct.pack("<H", FLOAT_FORMAT_TAG))
-        f.write(struct.pack("<H", CANONICAL_CHANNELS))
-        f.write(struct.pack("<I", CANONICAL_RATE))
-        f.write(struct.pack("<I", byte_rate))
-        f.write(struct.pack("<H", block_align))
-        f.write(struct.pack("<H", bits))
-        f.write(b"data")
-        f.write(struct.pack("<I", data_len))
-        f.write(pcm)
+    path.write_bytes(_float_wav_bytes(pcm))
 
 
 LIBRARY_DATA_ENV = "SAMPLE_HUB_DATA"

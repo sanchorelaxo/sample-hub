@@ -39,6 +39,7 @@ from server.library import (
 )
 from server.status import status_payload
 from server.device_tree import APP, tree
+from server.sources import list_source
 
 VERSION = APP.get("version", "0.1.0")
 
@@ -132,6 +133,20 @@ def make_server(
 
         def _handle_status(self) -> None:
             self._send_json(200, status_payload(**probe_kwargs))
+
+        def _handle_device_source(self, device_id: str) -> None:
+            try:
+                device = tree().by_id(device_id)
+            except KeyError:
+                self._send_json(404, {"error": "unknown device"})
+                return
+            if not device.source:
+                self._send_json(422, {"error": f"{device_id} is not a source"})
+                return
+            self._send_json(200, {
+                "device": device_id,
+                "entries": list_source(device_id, root_resolver(device_id)),
+            })
 
         def _handle_library_list(self) -> None:
             self._send_json(200, list_entries(library_dir))
@@ -243,6 +258,8 @@ def make_server(
             elif path == "/api/devices":
                 t = tree()
                 self._send_json(200, {"app": t.app, "devices": [d.to_dict() for d in t.devices]})
+            elif path.startswith("/api/devices/") and path.endswith("/source"):
+                self._handle_device_source(path[len("/api/devices/"):-len("/source")])
             elif path == "/api/library":
                 self._handle_library_list()
             elif path.startswith("/api/library/samples/"):

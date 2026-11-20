@@ -161,6 +161,30 @@ def test_devices_endpoint(hub):
     assert by_id["fx_wizard"]["is_flashable"] is True
 
 
+def test_device_source_endpoint(hub):
+    mount = hub["tmp_path"] / "op1"
+    (mount / "synth" / "user").mkdir(parents=True)
+    (mount / "synth" / "user" / "pad.aif").write_bytes(b"x")
+    status, payload = request_json(hub["port"], "GET", "/api/devices/op1/source")
+    assert status == 200
+    assert isinstance(payload, dict)
+    rels = [entry["rel"] for entry in payload["entries"]]
+    assert "synth/user/pad.aif" in rels
+
+
+def test_device_source_sink_only_422(hub):
+    status, payload = request_json(hub["port"], "GET", "/api/devices/spotykach/source")
+    assert status == 422
+    assert isinstance(payload, dict)
+    assert "not a source" in payload["error"]
+
+
+def test_device_source_unknown_device_404(hub):
+    status, payload = request_json(hub["port"], "GET", "/api/devices/nope/source")
+    assert status == 404
+    assert isinstance(payload, dict)
+
+
 def test_library_list_empty(hub):
     status, payload = request_json(hub["port"], "GET", "/api/library")
     assert status == 200
