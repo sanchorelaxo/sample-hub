@@ -39,7 +39,7 @@ from server.library import (
 )
 from server.status import status_payload
 from server.device_tree import APP, tree
-from server.sources import list_source
+from server.sources import SourceError, list_source, read_source
 
 VERSION = APP.get("version", "0.1.0")
 
@@ -217,16 +217,53 @@ def make_server(
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 self._send_json(400, {"error": f"invalid JSON: {exc}"})
                 return
-            source_id = body.get("source_id")
             target = body.get("target")
-            if not source_id or not target:
-                self._send_json(400, {"error": "source_id and target are required"})
+            if not target:
+                self._send_json(400, {"error": "target is required"})
                 return
             try:
-                kind, payload = resolve(source_id, library_dir)
-            except LibraryError:
-                self._send_json(404, {"error": "unknown source"})
+                target_dev = tree().by_id(target)
+            except KeyError:
+                self._send_json(422, {"error": f"unknown target {target!r}"})
                 return
+            if not target_dev.sink:
+                self._send_json(422, {"error": f"{target!r} is not a sink"})
+                return
+
+            source_device = body.get("source_device")
+            source_ref = body.get("source_ref")
+            source_id = body.get("source_id")
+            if source_device and source_ref:
+                try:
+                    source_dev = tree().by_id(source_device)
+                except KeyError:
+                    self._send_json(422, {"error": f"unknown source device {source_device!r}"})
+                    return
+                if not source_dev.source:
+                    self._send_json(422, {"error": f"{source_device!r} is not a source"})
+                    return
+                try:
+                    payload = read_source(
+                        source_device, source_ref, root_resolver(source_device)
+                    )
+                except SourceError as exc:
+                    self._send_json(404, {"error": str(exc)})
+                    return
+                kind = "sample"
+                source_name = source_ref
+            elif source_id:
+                try:
+                    kind, payload = resolve(source_id, library_dir)
+                except LibraryError:
+                    self._send_json(404, {"error": "unknown source"})
+                    return
+                source_name = source_id
+            else:
+                self._send_json(400, {
+                    "error": "source_id or source_device+source_ref is required"
+                })
+                return
+
             reason = reject_reason(kind, target)
             if reason is not None:
                 self._send_json(422, {"error": reason})
@@ -234,7 +271,7 @@ def make_server(
             params = body.get("params") or {}
             transfer_roots = root_resolver(target)
             job_id = job_queue.submit(
-                target, run_conversion, source_id, kind, payload, target, params, transfer_roots
+                target, run_conversion, source_name, kind, payload, target, params, transfer_roots
             )
             self._send_json(202, {"job_id": job_id})
 

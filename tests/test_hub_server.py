@@ -270,6 +270,47 @@ def test_submit_job_rejected_inline(hub):
     assert payload["error"] == "samples only"
 
 
+def test_submit_device_source_transfer(hub):
+    mount = hub["tmp_path"] / "op1"
+    (mount / "synth" / "user").mkdir(parents=True)
+    wav = make_wav_bytes(hub["tmp_path"], "pad")
+    (mount / "synth" / "user" / "pad.aif").write_bytes(wav)
+
+    status, accepted = request_json(
+        hub["port"], "POST", "/api/convert",
+        payload={"source_device": "op1", "source_ref": "synth/user/pad.aif", "target": "sp404"},
+    )
+    assert status == 202, accepted
+    assert isinstance(accepted, dict)
+    done = poll_job(hub["port"], accepted["job_id"])
+    assert isinstance(done, dict)
+    assert done["status"] == "done"
+    assert done["result"]["target"] == "sp404"
+    assert done["result"]["result"]["rel"].startswith("IMPORT/")
+    staged = [p.name for p in (hub["card_root"] / "IMPORT").iterdir()]
+    assert staged == ["pad.wav"]
+
+
+def test_submit_device_source_requires_source_device(hub):
+    status, payload = request_json(
+        hub["port"], "POST", "/api/convert",
+        payload={"source_device": "spotykach", "source_ref": "x.wav", "target": "sp404"},
+    )
+    assert status == 422
+    assert isinstance(payload, dict)
+    assert "not a source" in payload["error"]
+
+
+def test_submit_unknown_target_rejected(hub):
+    status, payload = request_json(
+        hub["port"], "POST", "/api/convert",
+        payload={"source_id": "whatever", "target": "nope"},
+    )
+    assert status == 422
+    assert isinstance(payload, dict)
+    assert payload["error"] == "unknown target 'nope'"
+
+
 def test_submit_job_unknown_source(hub):
     status, payload = request_json(
         hub["port"], "POST", "/api/convert",
