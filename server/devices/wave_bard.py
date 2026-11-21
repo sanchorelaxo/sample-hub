@@ -21,6 +21,7 @@ from pathlib import Path
 from server.convert import to_wave_bard_pcm16, to_wave_bard_processed
 from server.devices import READY_TO_FLASH
 from server.pattern import (
+    BASTL_MEMORY_SIZE,
     PROCESS_OPTIONS,
     WAVE_BARD_DEFAULT_LENGTH,
     WAVE_BARD_DEFAULT_RATE,
@@ -166,6 +167,11 @@ def encode_binary(
         + sum(16 + len(data) + padding for data, padding in sample_parts())
         + 4
     )
+    if total > BASTL_MEMORY_SIZE:
+        raise ValueError(
+            f"wave-bard binary is {total} bytes, over the {BASTL_MEMORY_SIZE}-byte "
+            "memory budget"
+        )
 
     out = bytearray()
     out += WAVE_BARD_MAGIC

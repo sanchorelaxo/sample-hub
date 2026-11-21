@@ -45,6 +45,11 @@ WAVE_BARD_RHYTHMS = (3, 32)
 FX_WIZARD_DEFAULT_LENGTH = 8
 WAVE_BARD_DEFAULT_LENGTH = 16
 
+# Bastl loader memory budget: 7.5 MiB (``memorySize = 7.5 * 1024 * 1024``) for
+# both the Wave Bard and FX Wizard loaders. The server refuses any ``k2wb`` or
+# ``k2fx`` user-data binary whose encoded length overruns this ceiling.
+BASTL_MEMORY_SIZE = 7_864_320  # 7.5 MiB (memorySize = 7.5 * 1024 * 1024)
+
 
 def step_active(steps: int, index: int, length: int) -> bool:
     """True when step ``index`` is set in a ``length``-step bitmask."""

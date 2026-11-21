@@ -16,7 +16,11 @@ import struct
 from pathlib import Path
 
 from server.devices import READY_TO_FLASH
-from server.pattern import FX_WIZARD_DEFAULT_LENGTH, validate_fx_wizard
+from server.pattern import (
+    BASTL_MEMORY_SIZE,
+    FX_WIZARD_DEFAULT_LENGTH,
+    validate_fx_wizard,
+)
 from server.uf2 import UF2_FAMILY_ID, USER_DATA_BEGIN, generate_uf2, merge_uf2
 
 # Bastl's fxWizardBinaryFormat.js container constants (port of the shared
@@ -80,6 +84,11 @@ def encode_binary(rhythms: list[int], sequencer_length: int) -> bytes:
     then one u32 LE bitmask per rhythm, then the 4-byte ``ahoj`` end marker.
     """
     total = FX_WIZARD_HEADER_SIZE + 4 * len(rhythms) + 4
+    if total > BASTL_MEMORY_SIZE:
+        raise ValueError(
+            f"fx-wizard binary is {total} bytes, over the {BASTL_MEMORY_SIZE}-byte "
+            "memory budget"
+        )
     out = bytearray()
     out += FX_WIZARD_MAGIC
     out += _u32_le(total)
