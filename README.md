@@ -44,6 +44,14 @@ Cancel / Undo live in the lower-right bar. Apply commits everything (labelled
 "Apply (and flash)" when any staged sink is flashable), Cancel clears all, Undo
 removes only the last change.
 
+Flashable Bastl sinks (Wave Bard, FX Wizard) are not drop-and-send targets:
+dropping onto one opens a firmware editor overlay (`client/src/editor.js`) that
+reproduces the Bastl web loaders — a rhythm editor + sequencer-length selector,
+and for Wave Bard a scales editor, a process-samples selector, quality, and
+sample banks. Save POSTs the full state to `/api/draft`, which bakes a `.uf2`
+draft via `server/pattern.py` (the rhythm/scale bitmask model) and the
+per-target writers in `server/devices/`.
+
 ## Milestone 9: server + rack client
 
 `server/hub_server.py` is the HTTP layer: `GET /api/health`, `GET /api/status`
@@ -105,5 +113,6 @@ instrument are marked `@pytest.mark.real_devices` and only run when you opt in:
     server/devices/        per-target writers (op1, spotykach, wave_bard, ...)
     server/jobs.py         convert dispatch + per-instrument job queue (9b)
     server/status.py       per-instrument presence probe (milestone 8)
+    server/pattern.py      rhythm/scale bitmask model + Bastl validation (10)
     client/                three.js rack client, no build step (milestones 9d, 10)
     SPEC.md                the contract this is built against

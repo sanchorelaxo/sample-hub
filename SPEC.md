@@ -157,18 +157,28 @@ sample-hub/
 ### API surface (proposed)
 
 ```
-GET  /api/health            {"ok":true,"version":"0.1.0"}
-GET  /api/status            per-instrument presence + transport state
-GET  /api/library           cached canonical samples + rhythm patterns
-POST /api/convert           {source_id, target, params} -> {job_id}
-GET  /api/jobs/<id>         {status:"queued|running|done|error", result, error}
-GET  /api/audio             convert canonical -> playable WAV (range requests)
-POST /api/restart           reload code on disk (execve, same as op1-web)
+GET  /api/health                       {"ok":true,"version":"0.1.0"}
+GET  /api/status                       per-instrument presence + transport state
+GET  /api/devices                      the device tree (single source of truth)
+GET  /api/devices/<id>/source          read a file back off a source instrument
+GET  /api/library                      cached canonical samples + rhythms (metadata)
+POST /api/library/samples?name=...     raw WAV body -> canonical cache entry
+POST /api/library/rhythms?name=...     step/gate JSON -> rhythm entry
+GET  /api/library/samples/<id>         canonical WAV bytes
+GET  /api/library/rhythms/<id>         step/gate JSON
+POST /api/convert                      {source_id, target, params?} -> {job_id}
+POST /api/draft                        full editor state -> firmware draft job id
+GET  /api/jobs/<id>                    {status:"queued|running|done|error", result, error}
 ```
 
-`/api/convert` is the one gesture. It resolves the source, normalizes to
+`/api/convert` is the one-shot gesture: it resolves the source, normalizes to
 canonical, converts for the target, transfers, and returns the on-device
-result.
+result. `/api/draft` is the authoring path for flashable Bastl sinks: it takes
+the whole editor state (rhythms, sequencer length, and for Wave Bard scales,
+process toggles, quality, and sample banks), resolves each bank sample to
+canonical WAV bytes server-side, bakes a `.uf2` draft, and returns a job id.
+Directly converting to `wave_bard` or `fx_wizard` via `/api/convert` is refused
+— those targets are authored in the editor, not dropped as one-shot jobs.
 
 ---
 
@@ -203,6 +213,38 @@ The invariant either way: **all device I/O lives behind `/api/convert`; the
 scene never talks to a device directly.** The 3D layer is presentation only,
 so the next phase can replace the rack with models without touching a line of
 the backend or the conversion matrix.
+
+### 5.2 Firmware editor (Wave Bard / FX Wizard)
+
+A drop onto a flashable Bastl sink (Wave Bard or FX Wizard) does not stage a
+one-shot conversion — it opens a full-screen authoring overlay, and the "edit"
+affordance on those panes opens the same editor empty. The editor reproduces
+the two Bastl web loaders:
+
+- **Rhythm editor + sequencer (both).** Each rhythm is a list item with a name
+  and a step grid. The sequencer-length selector offers the loader's options:
+  Classics `8/16/32/64`, Others `5,6,7,9,10,11,12,13,14,15,17,20,21,24,36,42,48,54,60,63`.
+  A dropped rhythm seeds a new entry.
+- **Scales editor (Wave Bard only).** Each scale is a 12-note chromatic grid
+  (black keys shaded); a set semitone selects the note.
+- **Process samples (Wave Bard only).** Four toggles — Fade in / Fade out
+  (0.005 s), Trim quiet (< -48 dB), Maximize to -0.1 dB.
+- **Quality (Wave Bard only).** HIGH 44.1 kHz / LOW 22.05 kHz / TELEPHONE
+  11.025 kHz.
+- **Sample banks (Wave Bard only).** 1–32 banks, 3–32 samples each (uniform);
+  a dropped sample seeds the first bank, and each bank is a drop zone for more.
+
+Save ("Apply (and flash)") serializes the state and POSTs `/api/draft`, which
+bakes a `.uf2` firmware draft and returns a job id; the pane shows the job like
+any other transfer. The client validates locally before submitting (rhythm and
+scale counts, uniform bank sizes) so the save button stays disabled until the
+draft is legal — mirroring `validate_wave_bard` / `validate_fx_wizard` on the
+server.
+
+Step and semitone data are integer bitmasks. A 64-step mask overflows a JSON
+number, so the client stores `steps` as a decimal string backed by BigInt and
+the server coerces it back with `int(...)`. The first step is the most
+significant bit: step `p` (0-based) is bit `(length - 1 - p)`.
 
 ### Panes
 
@@ -254,9 +296,10 @@ to flash" signal and auto-mounts each RPI-RP2 volume (two at once mount as
   - *rhythms* → Wave Bard, FX Wizard.
   - FX Wizard refuses a sample ("rhythms only — no sample input"); SP-404,
     OP-1 and Spotykach refuse a rhythm ("samples only").
-- **Drop = one conversion job.** The pane shows a job row with a spinner and
-  the target format being produced (e.g. "→ 48k float32 · slot G/2", "→ rhythm
-  .uf2 · 16 steps").
+- **Drop = one conversion job** — except on a flashable Bastl sink, where a
+  drop opens the firmware editor instead (§5.2). For a normal sink the pane
+  shows a job row with a spinner and the target format being produced (e.g.
+  "→ 48k float32 · slot G/2", "→ rhythm .uf2 · 16 steps").
 - **Invalid drops** (wrong asset type, over length cap, red pane) are rejected
   inline with the specific reason — "42 s stored cap", "rhythms only",
   "replug direct" — not a generic error.
@@ -310,6 +353,12 @@ without hardware.
 |---|---|---|---|
 | Wave Bard | step/gate JSON | rhythm bank + step count in firmware draft | map to loader rhythm slots |
 | FX Wizard | step/gate JSON | rhythm pattern + step count → `.uf2` | map to Chamber rhythm/step format |
+
+A rhythm is `{"name", "steps"}` and a scale is `{"name", "semitones"}`, both
+integer bitmasks with the first step/note as the most significant bit. The
+client sends a 64-step `steps` mask as a decimal string (BigInt) so it survives
+JSON; the server coerces with `int(...)` before validating. `steps == 0` or
+`semitones == 0` is empty and rejected.
 
 Each transform is a standalone function with a known input/output pair, so the
 whole matrix is testable against generated WAVs (or generated rhythm JSON)
