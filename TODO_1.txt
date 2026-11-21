@@ -63,7 +63,7 @@ remaining / in flight (since milestone 10):
     scroll bar when a card's list overflows, and keep each card's top on screen
     (tall cards overflow downward only, never above the viewport top).
 
-[ ] Spotykach is driven over USB transfer only (the spottytube-ext path), never
+[x] Spotykach is driven over USB transfer only (the spottytube-ext path), never
     by mounting its SD card. Clarify the mode split: "MIDI vs USB" is a
     misnomer — MIDI and CDC transfer are BOTH USB modes (same VID/PID
     0483:5740). The real split is USB mode vs firmware mode (DFU, 0483:df11);
