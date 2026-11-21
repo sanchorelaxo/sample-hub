@@ -9,7 +9,8 @@ dry-run-gated UF2 flash staging. See SPEC.md for the full contract.
 
 ![rack client](docs/screenshot.png)
 
-The rack with no instruments attached — every presence dot reads red. Each
+The rack with the desk instruments attached — OP-1, Spotykach, SP-404MK2 and
+FX Wizard show a presence dot (green ready, yellow update-mode). Each
 instrument is classified sink-only, source-only or sink-source; source devices
 (OP-1, SP-404 export dir) list their files, each draggable onto a legal sink.
 
