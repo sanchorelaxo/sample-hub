@@ -48,11 +48,11 @@ def _ffmpeg() -> str:
     return shutil.which("ffmpeg") or "ffmpeg"
 
 
-def _decode_cmd(src: Path) -> list[str]:
+def _decode_cmd(input_spec: str) -> list[str]:
     """The ffmpeg invocation that decodes any container to raw float32 PCM."""
     return [
         _ffmpeg(),
-        "-i", str(src),
+        "-i", input_spec,
         "-f", "f32le",
         "-acodec", "pcm_f32le",
         "-ar", str(CANONICAL_RATE),
@@ -63,7 +63,7 @@ def _decode_cmd(src: Path) -> list[str]:
 
 def _decode(src: Path) -> bytes:
     """Run ``_decode_cmd`` and return the raw interleaved float32 PCM on stdout."""
-    result = subprocess.run(_decode_cmd(src), capture_output=True)
+    result = subprocess.run(_decode_cmd(str(src)), capture_output=True)
     if result.returncode != 0:
         detail = result.stderr.decode(errors="replace").strip()
         raise NormalizeError(f"ffmpeg failed for {src.name}: {detail[-400:]}")
@@ -117,6 +117,20 @@ def normalize_to_bytes(src: Path | str) -> bytes:
     fed straight into the convert matrix with no temp file on disk.
     """
     return _float_wav_bytes(_decode(Path(src)))
+
+
+def normalize_bytes(wav: bytes) -> bytes:
+    """Decode in-memory WAV bytes to canonical 48 kHz stereo float32 WAV bytes.
+
+    Same ffmpeg invocation as ``normalize_to_bytes`` but reads from a stdin pipe
+    instead of a path, so an already-decoded source (an SP-404 ``.SMP`` container
+    unpacked by ``server.smp.smp_to_wav``) normalizes without touching disk.
+    """
+    result = subprocess.run(_decode_cmd("pipe:0"), input=wav, capture_output=True)
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip()
+        raise NormalizeError(f"ffmpeg failed for in-memory WAV: {detail[-400:]}")
+    return _float_wav_bytes(result.stdout)
 
 
 def _write_float_wav(path: Path, pcm: bytes) -> None:

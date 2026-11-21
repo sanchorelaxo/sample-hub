@@ -17,11 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.device_tree import tree
-from server.library import normalize_to_bytes
+from server.library import normalize_bytes, normalize_to_bytes
+from server.smp import smp_to_wav
 
 _OP1_BANKS = ("synth", "drum", "tape", "album")
 _OP1_SUFFIXES = {".aif", ".aiff"}
-_SP404_EXPORT_SUFFIXES = {".wav", ".aif", ".aiff"}
+_SP404_EXPORT_SUFFIXES = {".wav", ".aif", ".aiff", ".smp"}
 
 
 class SourceError(LookupError):
@@ -59,11 +60,13 @@ def read_source(device_id: str, source_ref: str, roots: dict | None = None) -> b
         raise SourceError(f"{device_id!r} is not a source")
     if device_id == "op1":
         path = _resolve_inside(roots.get("op1_mount"), source_ref)
-    elif device_id == "sp404":
+        return normalize_to_bytes(path)
+    if device_id == "sp404":
         path = _resolve_inside(roots.get("sp404_card_root"), source_ref)
-    else:
-        raise SourceError(f"no source reader for {device_id!r}")
-    return normalize_to_bytes(path)
+        if path.suffix.lower() == ".smp":
+            return normalize_bytes(smp_to_wav(path.read_bytes()))
+        return normalize_to_bytes(path)
+    raise SourceError(f"no source reader for {device_id!r}")
 
 
 def _list_op1(mount) -> list[dict]:

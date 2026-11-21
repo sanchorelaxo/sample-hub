@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import struct
 import wave
@@ -26,6 +27,20 @@ def _write_wav(path: Path, seconds: float = 0.25) -> None:
         w.setsampwidth(2)
         w.setframerate(44100)
         w.writeframes(b"\x00\x00" * frames)
+
+
+def _make_smp(channels: int, samples: list[int]) -> bytes:
+    """Build a valid SP-404MK2 ``.SMP`` file (SparkyMK2 RFWV layout)."""
+    header = bytearray(512)
+    header[0:4] = b"RFWV"
+    header[4:8] = struct.pack(">I", len(samples) * 2 + 504)
+    header[8:12] = struct.pack(">I", 48000)
+    header[12:16] = struct.pack(">I", channels)
+    header[16:20] = struct.pack(">I", 16)
+    header[0x20:0x30] = hashlib.md5(header[4:20]).digest()
+    header[0x30:512] = b"\xa5" * (512 - 0x30)
+    pcm = b"".join(struct.pack(">h", s) for s in samples)
+    return bytes(header) + pcm
 
 
 def test_sink_only_devices_have_no_source():
@@ -85,6 +100,34 @@ def test_sp404_source_lists_only_export(tmp_path):
 
 def test_sp404_source_empty_without_export(tmp_path):
     assert sources.list_source("sp404", {"sp404_card_root": tmp_path}) == []
+
+
+def test_sp404_source_lists_smp(tmp_path):
+    (tmp_path / "EXPORT" / "SAMPLE").mkdir(parents=True)
+    (tmp_path / "EXPORT" / "PROJECT" / "p1" / "SMPL").mkdir(parents=True)
+    (tmp_path / "EXPORT" / "SAMPLE" / "a.wav").write_bytes(b"x")
+    (tmp_path / "EXPORT" / "PROJECT" / "p1" / "SMPL" / "BANK1-1.smp").write_bytes(b"x")
+
+    entries = sources.list_source("sp404", {"sp404_card_root": tmp_path})
+    rels = {e["rel"] for e in entries}
+    assert "EXPORT/SAMPLE/a.wav" in rels
+    assert "EXPORT/PROJECT/p1/SMPL/BANK1-1.smp" in rels
+
+
+def test_read_source_decodes_smp(tmp_path):
+    card = tmp_path
+    (card / "EXPORT" / "PROJECT" / "p1" / "SMPL").mkdir(parents=True)
+    smp = _make_smp(2, [0, 1000, -1000, 32767])
+    (card / "EXPORT" / "PROJECT" / "p1" / "SMPL" / "BANK1-1.smp").write_bytes(smp)
+
+    data = sources.read_source(
+        "sp404", "EXPORT/PROJECT/p1/SMPL/BANK1-1.smp", {"sp404_card_root": card}
+    )
+    assert data[:4] == b"RIFF"
+    # canonical header: float32 tag 0x0003, stereo, 48000 Hz
+    assert struct.unpack("<H", data[20:22])[0] == 0x0003
+    assert struct.unpack("<H", data[22:24])[0] == 2
+    assert struct.unpack("<I", data[24:28])[0] == 48000
 
 
 def test_read_source_decodes_to_canonical(tmp_path):

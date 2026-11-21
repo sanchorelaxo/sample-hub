@@ -169,6 +169,25 @@ def test_sp404_is_16bit_48khz():
     assert channels == 2
 
 
+def test_sp404_wav_sizes_are_conformant():
+    # The MK2 import parser expects a closed RIFF: the RIFF and data size
+    # fields must be real byte counts, not ffmpeg's 0xFFFFFFFF streaming
+    # placeholder (which leaks in when ffmpeg writes WAV to a pipe).
+    out = to_sp404(canonical_wav())
+    assert struct.unpack("<I", out[4:8])[0] == len(out) - 8  # RIFF size
+    tag, channels, rate, bits = wav_fmt(out)
+    off = 12
+    while off + 8 <= len(out):
+        cid = out[off : off + 4]
+        size = struct.unpack("<I", out[off + 4 : off + 8])[0]
+        if cid == b"data":
+            assert size == len(out) - (off + 8)              # data size
+            assert size % (channels * bits // 8) == 0        # whole frames
+            return
+        off += 8 + size + (size & 1)
+    raise AssertionError("no data chunk")
+
+
 def test_op1_drum_is_aifc_mono_44100_sowt():
     out = to_op1_drum(canonical_wav(seconds=2.0), filename="kick.wav")
     channels, rate, bits, comp = aiff_comm(out)

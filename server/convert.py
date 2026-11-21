@@ -95,6 +95,31 @@ def _write_float_wav(pcm: bytes, channels: int, rate: int) -> bytes:
     return buf.getvalue()
 
 
+def _write_pcm16_wav(pcm: bytes, channels: int, rate: int) -> bytes:
+    """Wrap raw interleaved s16le PCM in a plain 16-bit PCM WAV (tag 0x0001)."""
+    bits = 16
+    block_align = channels * bits // 8
+    byte_rate = rate * block_align
+    data_len = len(pcm)
+    riff_size = 4 + (8 + 16) + (8 + data_len)
+    buf = io.BytesIO()
+    buf.write(b"RIFF")
+    buf.write(struct.pack("<I", riff_size))
+    buf.write(b"WAVE")
+    buf.write(b"fmt ")
+    buf.write(struct.pack("<I", 16))
+    buf.write(struct.pack("<H", 1))  # PCM
+    buf.write(struct.pack("<H", channels))
+    buf.write(struct.pack("<I", rate))
+    buf.write(struct.pack("<I", byte_rate))
+    buf.write(struct.pack("<H", block_align))
+    buf.write(struct.pack("<H", bits))
+    buf.write(b"data")
+    buf.write(struct.pack("<I", data_len))
+    buf.write(pcm)
+    return buf.getvalue()
+
+
 def _as_floats(pcm: bytes) -> array.array:
     samples = array.array("f")
     samples.frombytes(pcm[: len(pcm) - (len(pcm) % 4)])
@@ -156,12 +181,18 @@ def to_spotykach(src: bytes) -> bytes:
 
 
 def to_sp404(src: bytes) -> bytes:
-    """Canonical -> 16-bit linear 48 kHz stereo WAV (SparkyMK2 native rate)."""
-    return _run(
+    """Canonical -> 16-bit linear 48 kHz stereo WAV (SparkyMK2 native rate).
+
+    ffmpeg's WAV muxer leaves 0xFFFFFFFF size placeholders when stdout is a
+    pipe, so decode to raw s16le here and wrap a closed RIFF ourselves — the
+    MK2 import parser expects real sizes.
+    """
+    pcm = _run(
         ["-i", "pipe:0", "-ar", str(SP404_RATE), "-ac", "2",
-         "-c:a", "pcm_s16le", "-f", "wav", "-"],
+         "-c:a", "pcm_s16le", "-f", "s16le", "-"],
         stdin=src,
     )
+    return _write_pcm16_wav(pcm, 2, SP404_RATE)
 
 
 def to_op1_drum(src: bytes, filename: str) -> bytes:
@@ -184,6 +215,22 @@ def to_op1_drum(src: bytes, filename: str) -> bytes:
     )
 
 
+def _process_mono(src: bytes, sample_rate: int, process) -> array.array:
+    """Canonical -> mono float32 samples at ``sample_rate``, loader's process applied."""
+    if sample_rate not in WAVE_BARD_RATES.values():
+        raise ValueError(f"unsupported Wave Bard sample rate {sample_rate}")
+    samples = _as_floats(_decode_float(src, 1, sample_rate))
+    if "fadeIn" in process:
+        samples = _fade_in(samples, FADE_SECONDS, sample_rate)
+    if "fadeOut" in process:
+        samples = _fade_out(samples, FADE_SECONDS, sample_rate)
+    if "trimQuiet" in process:
+        samples = _trim_below(samples, TRIM_QUIET_DB)
+    if "maximize" in process:
+        samples = _maximize(samples, MAXIMIZE_DB)
+    return samples
+
+
 def to_wave_bard_processed(
     src: bytes,
     sample_rate: int = WAVE_BARD_DEFAULT_RATE,
@@ -196,19 +243,28 @@ def to_wave_bard_processed(
     loader's HIGH/LOW/TELEPHONE quality options). Unlike the legacy
     ``to_wave_bard``, no retuning is applied — this mirrors the Bastl loader.
     """
-    if sample_rate not in WAVE_BARD_RATES.values():
-        raise ValueError(f"unsupported Wave Bard sample rate {sample_rate}")
-    mono = _decode_float(src, 1, sample_rate)
-    samples = _as_floats(mono)
-    if "fadeIn" in process:
-        samples = _fade_in(samples, FADE_SECONDS, sample_rate)
-    if "fadeOut" in process:
-        samples = _fade_out(samples, FADE_SECONDS, sample_rate)
-    if "trimQuiet" in process:
-        samples = _trim_below(samples, TRIM_QUIET_DB)
-    if "maximize" in process:
-        samples = _maximize(samples, MAXIMIZE_DB)
+    samples = _process_mono(src, sample_rate, process)
     return _write_float_wav(samples.tobytes(), 1, sample_rate)
+
+
+def to_wave_bard_pcm16(
+    src: bytes,
+    sample_rate: int = WAVE_BARD_DEFAULT_RATE,
+    process=(),
+) -> bytes:
+    """Canonical -> mono Int16 LE PCM (the raw sample data in a ``k2wb`` image).
+
+    Quantization mirrors the loader's ``WaveFile.getSamples(true, Int16Array)``:
+    clamp to [-1, 1], scale by 0x8000 (negative) / 0x7FFF (positive), truncate
+    toward zero. The container stores samples as Int16, not the float32 WAV that
+    ``to_wave_bard_processed`` emits for preview.
+    """
+    samples = _process_mono(src, sample_rate, process)
+    out = array.array("h")
+    for x in samples:
+        s = max(-1.0, min(1.0, x))
+        out.append(int(s * 0x8000) if s < 0 else int(s * 0x7FFF))
+    return out.tobytes()
 
 
 # ---- legacy Wave Bard transform (tune-to-C) ----------------------------
