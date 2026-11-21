@@ -14,7 +14,10 @@ export function buildPanes(container, devices) {
     pane.dataset.source = device.source ? "1" : "";
     pane.dataset.flashable = device.is_flashable ? "1" : "";
     pane.innerHTML = `
-      <h2 class="pane-label"><span class="dot red" data-role="dot"></span>${device.label}</h2>
+      <h2 class="pane-label">
+        <span class="dot red" data-role="dot"></span>${device.label}
+        ${device.is_flashable ? '<button class="pane-edit" data-role="edit" type="button" title="edit firmware">edit</button>' : ""}
+      </h2>
       <p class="detail" data-role="detail">—</p>
       <ul class="source-list" data-role="source"></ul>
       <p class="empty" data-role="source-empty" hidden>no files</p>
@@ -29,6 +32,7 @@ export function buildPanes(container, devices) {
       sourceEmpty: pane.querySelector('[data-role="source-empty"]'),
       pending: pane.querySelector('[data-role="pending"]'),
       jobs: pane.querySelector('[data-role="jobs"]'),
+      edit: pane.querySelector('[data-role="edit"]'),
       device,
     });
   }

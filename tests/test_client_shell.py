@@ -40,6 +40,7 @@ SRC_FILES = [
     "src/layout.js",
     "src/panes.js",
     "src/dragdrop.js",
+    "src/editor.js",
     "src/status.js",
     "src/staging.js",
 ]

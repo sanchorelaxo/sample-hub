@@ -22,6 +22,7 @@ import {
   cancelAll,
   applyChanges,
 } from "./staging.js";
+import { openEditor, setDraftSubmitter } from "./editor.js";
 
 const canvas = document.getElementById("scene");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -187,6 +188,30 @@ async function pollJob(jobId, row) {
   settleJob(row, false, "timed out");
 }
 
+async function submitDraft(draft) {
+  const pane = handle.panes.get(draft.target);
+  let jobId;
+  try {
+    const res = await fetch("/api/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      if (pane) flashRefused(pane, payload.error || `draft refused (${res.status})`);
+      return false;
+    }
+    jobId = payload.job_id;
+  } catch (err) {
+    if (pane) flashRefused(pane, "server unreachable");
+    return false;
+  }
+  const row = addJob(handle, draft.target, jobId, `draft → ${draft.target}`);
+  pollJob(jobId, row);
+  return true;
+}
+
 function apply() {
   const batch = applyChanges();
   renderActions();
@@ -210,6 +235,12 @@ async function start() {
   scene.add(rack.group);
   handle = buildPanes(document.getElementById("panes"), devices);
   wireDragDrop(handle, renderActions);
+  setDraftSubmitter(submitDraft);
+  for (const pane of handle.panes.values()) {
+    if (pane.edit) {
+      pane.edit.addEventListener("click", () => openEditor(pane.device));
+    }
+  }
 
   document.getElementById("apply").addEventListener("click", apply);
   document.getElementById("cancel").addEventListener("click", () => {

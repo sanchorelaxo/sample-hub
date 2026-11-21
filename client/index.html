@@ -22,6 +22,102 @@
       </div>
     </div>
   </div>
+
+  <div id="editor" class="editor" hidden>
+    <div class="editor-backdrop"></div>
+    <div class="editor-dialog" role="dialog" aria-modal="true" aria-label="firmware editor">
+      <header class="editor-head">
+        <h2 id="editor-title">Editor</h2>
+        <button id="editor-close" class="editor-close" type="button" aria-label="close">×</button>
+      </header>
+      <div class="editor-body">
+        <section class="editor-section">
+          <label class="editor-field">
+            <span>Sequencer length</span>
+            <select id="editor-length">
+              <optgroup label="Classics">
+                <option value="8">8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+                <option value="64">64</option>
+              </optgroup>
+              <optgroup label="Others">
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12">12</option>
+                <option value="13">13</option>
+                <option value="14">14</option>
+                <option value="15">15</option>
+                <option value="17">17</option>
+                <option value="20">20</option>
+                <option value="21">21</option>
+                <option value="24">24</option>
+                <option value="36">36</option>
+                <option value="42">42</option>
+                <option value="48">48</option>
+                <option value="54">54</option>
+                <option value="60">60</option>
+                <option value="63">63</option>
+              </optgroup>
+            </select>
+          </label>
+        </section>
+
+        <section class="editor-section">
+          <div class="editor-section-head">
+            <h3>Rhythms</h3>
+            <button id="editor-add-rhythm" class="editor-add" type="button" title="add rhythm">+</button>
+          </div>
+          <div id="editor-rhythm-grid" class="step-grid"></div>
+          <ul id="editor-rhythm-list" class="editor-list"></ul>
+        </section>
+
+        <section id="editor-section-scales" class="editor-section" hidden>
+          <div class="editor-section-head">
+            <h3>Scales</h3>
+            <button id="editor-add-scale" class="editor-add" type="button" title="add scale">+</button>
+          </div>
+          <div id="editor-scale-grid" class="step-grid scale-grid"></div>
+          <ul id="editor-scale-list" class="editor-list"></ul>
+        </section>
+
+        <section id="editor-section-process" class="editor-section" hidden>
+          <h3>Process samples</h3>
+          <div id="editor-process" class="editor-process">
+            <label><input type="checkbox" data-process="fadeIn"> Fade in 0.005 s</label>
+            <label><input type="checkbox" data-process="fadeOut"> Fade out 0.005 s</label>
+            <label><input type="checkbox" data-process="trimQuiet"> Trim quiet (&lt; -48 dB)</label>
+            <label><input type="checkbox" data-process="maximize"> Maximize to -0.1 dB</label>
+          </div>
+          <label class="editor-field">
+            <span>Quality</span>
+            <select id="editor-quality">
+              <option value="44100">HIGH</option>
+              <option value="22050">LOW</option>
+              <option value="11025">TELEPHONE</option>
+            </select>
+          </label>
+        </section>
+
+        <section id="editor-section-banks" class="editor-section" hidden>
+          <div class="editor-section-head">
+            <h3>Sample banks</h3>
+            <button id="editor-add-bank" class="editor-add" type="button" title="add bank">+</button>
+          </div>
+          <div id="editor-banks" class="editor-banks"></div>
+        </section>
+      </div>
+      <footer class="editor-foot">
+        <span id="editor-status" class="editor-status"></span>
+        <button id="editor-save" class="editor-save" type="button">Apply (and flash)</button>
+      </footer>
+    </div>
+  </div>
+
   <script type="module" src="src/main.js"></script>
 </body>
 </html>

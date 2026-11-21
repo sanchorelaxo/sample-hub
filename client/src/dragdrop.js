@@ -4,6 +4,7 @@
 // asset-type legality (HTTP 422, SPEC.md §6).
 import { stage } from "./staging.js";
 import { flashRefused } from "./panes.js";
+import { openEditor } from "./editor.js";
 
 const DROP_TYPE = "application/x-sample-hub";
 
@@ -89,6 +90,18 @@ export function wireDragDrop(handle, onChanged) {
       const reason = rejectReason(data.sourceType, pane.device);
       if (reason) {
         flashRefused(pane, reason);
+        return;
+      }
+      if (pane.device.is_flashable) {
+        // Flashable Bastl sinks open the authoring editor instead of staging a
+        // one-shot transfer: a dropped sample seeds a Wave Bard bank, a dropped
+        // rhythm seeds the rhythm list (SPEC.md §5.2).
+        openEditor(
+          pane.device,
+          data.sourceType === "sample"
+            ? { kind: "sample", sourceDevice: data.sourceDevice, sourceRef: data.sourceRef }
+            : { kind: "rhythm", name: data.sourceRef },
+        );
         return;
       }
       if (el.dataset.state !== "green") {
