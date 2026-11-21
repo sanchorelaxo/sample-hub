@@ -10,6 +10,7 @@ Serves the rack client (static files) and a small JSON API:
   GET  /api/library/samples/<id>        canonical WAV bytes
   GET  /api/library/rhythms/<id>        step/gate JSON
   POST /api/convert                     {source_id, target, params?} -> job id
+  POST /api/draft                       full editor state -> firmware draft job id
   GET  /api/jobs/<id>                   job status/result
 
 Wrong asset types are refused inline with the SPEC.md §6 reason (HTTP 422)
@@ -27,7 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from server.jobs import JobQueue, reject_reason, run_conversion
+from server.jobs import JobQueue, reject_reason, run_conversion, run_draft
 from server.library import (
     LibraryError,
     NormalizeError,
@@ -275,6 +276,74 @@ def make_server(
             )
             self._send_json(202, {"job_id": job_id})
 
+        def _resolve_sample(self, sample: dict) -> bytes:
+            """Resolve one bank sample reference to canonical WAV bytes."""
+            source_device = sample.get("source_device")
+            source_ref = sample.get("source_ref")
+            source_id = sample.get("source_id")
+            if source_device and source_ref:
+                try:
+                    source_dev = tree().by_id(source_device)
+                except KeyError:
+                    raise ValueError(f"unknown source device {source_device!r}")
+                if not source_dev.source:
+                    raise ValueError(f"{source_device!r} is not a source")
+                try:
+                    return read_source(source_device, source_ref, root_resolver(source_device))
+                except SourceError as exc:
+                    raise ValueError(str(exc))
+            if source_id:
+                try:
+                    kind, payload = resolve(source_id, library_dir)
+                except LibraryError:
+                    raise ValueError("unknown source")
+                if kind != "sample":
+                    raise ValueError("source is not a sample")
+                assert isinstance(payload, bytes)
+                return payload
+            raise ValueError("sample needs source_id or source_device+source_ref")
+
+        def _handle_draft_submit(self) -> None:
+            try:
+                state = self._read_json()
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                self._send_json(400, {"error": f"invalid JSON: {exc}"})
+                return
+            if not isinstance(state, dict):
+                self._send_json(400, {"error": "draft body must be a JSON object"})
+                return
+            target = state.get("target")
+            if target not in ("wave_bard", "fx_wizard"):
+                self._send_json(422, {"error": "draft target must be wave_bard or fx_wizard"})
+                return
+            try:
+                target_dev = tree().by_id(target)
+            except KeyError:
+                self._send_json(422, {"error": f"unknown target {target!r}"})
+                return
+            if not target_dev.sink:
+                self._send_json(422, {"error": f"{target!r} is not a sink"})
+                return
+
+            if target == "wave_bard":
+                resolved = dict(state)
+                resolved["banks"] = []
+                for bank in state.get("banks", []):
+                    samples = []
+                    for sample in bank.get("samples", []):
+                        try:
+                            data = self._resolve_sample(sample)
+                        except ValueError as exc:
+                            self._send_json(422, {"error": str(exc)})
+                            return
+                        samples.append({"name": sample.get("name", "sample"), "data": data})
+                    resolved["banks"].append({**bank, "samples": samples})
+                state = resolved
+
+            transfer_roots = root_resolver(target)
+            job_id = job_queue.submit(target, run_draft, target, state, transfer_roots)
+            self._send_json(202, {"job_id": job_id})
+
         def _handle_job_status(self, job_id: str) -> None:
             try:
                 state = job_queue.status(job_id)
@@ -320,6 +389,8 @@ def make_server(
                 self._handle_rhythm_save(query)
             elif path == "/api/convert":
                 self._handle_job_submit()
+            elif path == "/api/draft":
+                self._handle_draft_submit()
             else:
                 self._send_json(404, {"error": "not found"})
 

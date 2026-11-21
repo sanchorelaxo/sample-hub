@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from server import hub_server
+from server.pattern import pattern_to_steps
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None, reason="ffmpeg not installed"
@@ -334,3 +335,79 @@ def test_static_index(hub):
     assert status == 200
     assert "text/html" in headers.get("Content-Type", "")
     assert data == b"<html>rack</html>"
+
+
+def rhythm_set(n: int = 3, length: int = 8) -> list[dict]:
+    return [
+        {"name": f"r{i}", "steps": pattern_to_steps([i % length], length)}
+        for i in range(n)
+    ]
+
+
+def scale_set(n: int = 3) -> list[dict]:
+    masks = [0b101011010101, 0b101101011010, 0b101010010100]
+    return [
+        {"name": f"scale {i}", "semitones": masks[i % len(masks)]}
+        for i in range(n)
+    ]
+
+
+def test_submit_draft_fx_wizard(hub):
+    status, accepted = request_json(
+        hub["port"], "POST", "/api/draft",
+        payload={"target": "fx_wizard", "sequencerLength": 8, "rhythms": rhythm_set()},
+    )
+    assert status == 202, accepted
+    done = poll_job(hub["port"], accepted["job_id"])
+    assert done["status"] == "done"
+    assert done["result"]["result"]["target"] == "fx-wizard"
+    assert (hub["tmp_path"] / "staging" / "fx-wizard" / "manifest.json").is_file()
+
+
+def test_submit_draft_wave_bard_with_device_source(hub):
+    mount = hub["tmp_path"] / "op1"
+    (mount / "synth" / "user").mkdir(parents=True)
+    wav = make_wav_bytes(hub["tmp_path"], "pad")
+    (mount / "synth" / "user" / "pad.aif").write_bytes(wav)
+
+    status, accepted = request_json(
+        hub["port"], "POST", "/api/draft",
+        payload={
+            "target": "wave_bard",
+            "sampleRate": 22050,
+            "audioProcessing": {
+                "fadeIn": True, "fadeOut": False, "trimQuiet": False, "maximize": False,
+            },
+            "sequencerLength": 16,
+            "banks": [{"name": "a", "samples": [
+                {"name": "kick", "source_device": "op1", "source_ref": "synth/user/pad.aif"},
+                {"name": "snare", "source_device": "op1", "source_ref": "synth/user/pad.aif"},
+                {"name": "hat", "source_device": "op1", "source_ref": "synth/user/pad.aif"},
+            ]}],
+            "scales": scale_set(),
+            "rhythms": rhythm_set(3, 16),
+        },
+    )
+    assert status == 202, accepted
+    done = poll_job(hub["port"], accepted["job_id"])
+    assert done["status"] == "done"
+    draft = done["result"]["result"]
+    assert draft["target"] == "wave-bard"
+    assert len(draft["banks"][0]["samples"]) == 3
+    assert (hub["tmp_path"] / "staging" / "wave-bard" / "manifest.json").is_file()
+
+
+def test_submit_draft_rejects_non_flashable_target(hub):
+    status, payload = request_json(
+        hub["port"], "POST", "/api/draft", payload={"target": "sp404"},
+    )
+    assert status == 422
+    assert "wave_bard or fx_wizard" in payload["error"]
+
+
+def test_submit_draft_unknown_target(hub):
+    status, payload = request_json(
+        hub["port"], "POST", "/api/draft", payload={"target": "nope"},
+    )
+    assert status == 422
+    assert "wave_bard or fx_wizard" in payload["error"]
