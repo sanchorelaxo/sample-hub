@@ -8,6 +8,12 @@ import { openEditor } from "./editor.js";
 
 const DROP_TYPE = "application/x-sample-hub";
 
+// Browsers keep DataTransfer payloads "protected" during dragover: getData()
+// returns "" until the drop event itself. So the drag payload is captured here
+// at dragstart (where getData is not needed) and read back during dragover to
+// decide whether to preventDefault (which is what permits the drop at all).
+let activeDrag = null;
+
 function readDrag(event) {
   const raw = event.dataTransfer.getData(DROP_TYPE);
   if (!raw) return null;
@@ -39,15 +45,16 @@ export function wireDragDrop(handle, onChanged) {
       pane.source.addEventListener("dragstart", (event) => {
         const item = event.target.closest(".source-item");
         if (!item) return;
-        event.dataTransfer.setData(
-          DROP_TYPE,
-          JSON.stringify({
-            sourceDevice: item.dataset.sourceDevice,
-            sourceRef: item.dataset.sourceRef,
-            sourceType: item.dataset.sourceType || "sample",
-          }),
-        );
+        activeDrag = {
+          sourceDevice: item.dataset.sourceDevice,
+          sourceRef: item.dataset.sourceRef,
+          sourceType: item.dataset.sourceType || "sample",
+        };
+        event.dataTransfer.setData(DROP_TYPE, JSON.stringify(activeDrag));
         event.dataTransfer.effectAllowed = "copy";
+      });
+      pane.source.addEventListener("dragend", () => {
+        activeDrag = null;
       });
     }
 
@@ -56,9 +63,9 @@ export function wireDragDrop(handle, onChanged) {
 
     el.addEventListener("dragover", (event) => {
       if (!event.dataTransfer.types.includes(DROP_TYPE)) return;
-      const data = readDrag(event);
-      if (!data) return;
       event.preventDefault();
+      const data = activeDrag;
+      if (!data) return;
       const reason =
         data.sourceDevice === pane.device.id
           ? "same device"
@@ -81,7 +88,7 @@ export function wireDragDrop(handle, onChanged) {
       clear();
       if (!event.dataTransfer.types.includes(DROP_TYPE)) return;
       event.preventDefault();
-      const data = readDrag(event);
+      const data = activeDrag || readDrag(event);
       if (!data) return;
       if (data.sourceDevice === pane.device.id) {
         flashRefused(pane, "same device");

@@ -164,6 +164,22 @@ def test_client_derives_device_order_from_server():
     assert not re.search(r'id:\s*"', layout), "layout.js must stay geometry-only (no device list)"
 
 
+def test_dragover_permits_drop_without_getdata():
+    """Browsers protect the DataTransfer payload during dragover — getData()
+    returns "" until drop. So the dragover handler must read the payload from
+    the dragstart capture (activeDrag), never from readDrag/getData, or it will
+    bail before preventDefault() and the drop event never fires (silent no-op)."""
+    source = (CLIENT_DIR / "src/dragdrop.js").read_text()
+    assert 'addEventListener("dragover"' in source
+    # Slice the dragover listener body (up to the next listener registration).
+    dragover = source.split('addEventListener("dragover"')[1].split(
+        'addEventListener("dragleave"'
+    )[0]
+    assert "readDrag" not in dragover, "dragover must not read the payload via getData"
+    assert "activeDrag" in dragover, "dragover must read the dragstart-captured payload"
+    assert "event.preventDefault()" in dragover, "dragover must permit the drop"
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_client_source_parses_as_esm():
     for rel in SRC_FILES:
