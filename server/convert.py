@@ -10,14 +10,18 @@ Target formats (verified against ffmpeg output and, for SP-404, SparkyMK2):
     SP-404    : 48 kHz 16-bit linear WAV (native device rate per SparkyMK2,
                 which stores SMP samples at SAMPLE_RATE = 48_000)
     OP-1 drum : AIFC (compression "sowt") mono 44.1 kHz 16-bit, <= 12 s
-    Wave Bard : mono 48 kHz float32 WAV, tuned to nearest C, silence trimmed
+    Wave Bard : mono float32 WAV at the loader's selected quality rate, with
+                the loader's "process samples" toggles applied (fade in/out,
+                trim quiet under -48 dB, maximize to -0.1 dB). See
+                ``to_wave_bard_processed``.
 
-Pitch "to C" for Wave Bard uses ffmpeg's ``asetrate`` + ``aresample``, which
-shifts pitch by resampling the sample rate (a tape-speed shift). It changes the
-duration by the same factor — a known simplification. A duration-preserving
-shift (rubberband) can replace it in a later milestone without changing the
-matrix contract.
+``to_wave_bard`` below is a legacy convenience (tune-to-nearest-C + trim +
+48 kHz) retained from an earlier milestone; the loader editor path uses
+``to_wave_bard_processed`` instead. Pitch "to C" uses ffmpeg's ``asetrate`` +
+``aresample``, which shifts pitch by resampling the sample rate (a tape-speed
+shift) and changes duration by the same factor — a known simplification.
 """
+
 from __future__ import annotations
 
 import array
@@ -28,10 +32,16 @@ import struct
 import subprocess
 
 from server.library import CANONICAL_CHANNELS, CANONICAL_RATE, FLOAT_FORMAT_TAG, NormalizeError
+from server.pattern import WAVE_BARD_DEFAULT_RATE, WAVE_BARD_RATES
 
 OP1_DRUM_MAX_SECONDS = 12.0
 OP1_RATE = 44100
 SP404_RATE = 48000  # SparkyMK2 crates/sp404-formats/src/smp.rs: SAMPLE_RATE = 48_000
+
+# Loader "process samples" toggles, applied in this fixed order.
+FADE_SECONDS = 0.005
+TRIM_QUIET_DB = -48.0
+MAXIMIZE_DB = -0.1
 
 
 def _ffmpeg() -> str:
@@ -91,6 +101,118 @@ def _as_floats(pcm: bytes) -> array.array:
     return samples
 
 
+def _fade_in(samples: array.array, seconds: float, rate: int) -> array.array:
+    """Linear ramp 0 -> 1 over ``seconds`` at the start."""
+    n = min(int(round(seconds * rate)), len(samples))
+    out = array.array("f", samples)
+    for i in range(n):
+        out[i] *= i / max(n - 1, 1)
+    return out
+
+
+def _fade_out(samples: array.array, seconds: float, rate: int) -> array.array:
+    """Linear ramp 1 -> 0 over ``seconds`` at the end."""
+    n = min(int(round(seconds * rate)), len(samples))
+    out = array.array("f", samples)
+    for i in range(n):
+        out[len(out) - 1 - i] *= i / max(n - 1, 1)
+    return out
+
+
+def _trim_below(samples: array.array, db: float) -> array.array:
+    """Drop leading/trailing samples quieter than ``db`` (full-scale dB)."""
+    threshold = 10.0 ** (db / 20.0)
+    start = 0
+    end = len(samples)
+    for i, x in enumerate(samples):
+        if abs(x) >= threshold:
+            start = i
+            break
+    for i in range(len(samples) - 1, -1, -1):
+        if abs(samples[i]) >= threshold:
+            end = i + 1
+            break
+    return samples[start:end]
+
+
+def _maximize(samples: array.array, db: float) -> array.array:
+    """Scale the peak to ``db`` (full-scale dB), e.g. -0.1 dB."""
+    if not samples:
+        return samples
+    target = 10.0 ** (db / 20.0)
+    peak = max(abs(x) for x in samples)
+    if peak <= 1e-12:
+        return samples
+    gain = target / peak
+    return array.array("f", (x * gain for x in samples))
+
+
+# ---- audio rows --------------------------------------------------------
+
+def to_spotykach(src: bytes) -> bytes:
+    """Canonical 48k stereo float32 WAV -> itself (re-encoded, tag 0x0003)."""
+    pcm = _decode_float(src, CANONICAL_CHANNELS, CANONICAL_RATE)
+    return _write_float_wav(pcm, CANONICAL_CHANNELS, CANONICAL_RATE)
+
+
+def to_sp404(src: bytes) -> bytes:
+    """Canonical -> 16-bit linear 48 kHz stereo WAV (SparkyMK2 native rate)."""
+    return _run(
+        ["-i", "pipe:0", "-ar", str(SP404_RATE), "-ac", "2",
+         "-c:a", "pcm_s16le", "-f", "wav", "-"],
+        stdin=src,
+    )
+
+
+def to_op1_drum(src: bytes, filename: str) -> bytes:
+    """Canonical -> AIFC (sowt) mono 44.1 kHz 16-bit, refusing > 12 s.
+
+    This is the raw audio container only. A usable OP-1 drum kit also needs the
+    FVER/APPL slice metadata that ``server.devices.op1.build_drum_kit`` adds by
+    reusing op1-web's drumkit; that module is the authoritative drum path.
+    """
+    mono = _decode_float(src, 1, OP1_RATE)  # measure duration from the mono decode
+    duration = len(mono) / 4 / OP1_RATE
+    if duration > OP1_DRUM_MAX_SECONDS:
+        raise ValueError(
+            f"{filename}: {duration:.1f}s exceeds the {OP1_DRUM_MAX_SECONDS:.0f}s drum cap"
+        )
+    return _run(
+        ["-i", "pipe:0", "-ar", str(OP1_RATE), "-ac", "1",
+         "-c:a", "pcm_s16le", "-f", "aiff", "-"],
+        stdin=src,
+    )
+
+
+def to_wave_bard_processed(
+    src: bytes,
+    sample_rate: int = WAVE_BARD_DEFAULT_RATE,
+    process=(),
+) -> bytes:
+    """Canonical -> mono float32 WAV at ``sample_rate`` with the loader's process.
+
+    ``process`` is an iterable over {"fadeIn", "fadeOut", "trimQuiet",
+    "maximize"}. ``sample_rate`` should be one of ``WAVE_BARD_RATES`` (the
+    loader's HIGH/LOW/TELEPHONE quality options). Unlike the legacy
+    ``to_wave_bard``, no retuning is applied — this mirrors the Bastl loader.
+    """
+    if sample_rate not in WAVE_BARD_RATES.values():
+        raise ValueError(f"unsupported Wave Bard sample rate {sample_rate}")
+    mono = _decode_float(src, 1, sample_rate)
+    samples = _as_floats(mono)
+    if "fadeIn" in process:
+        samples = _fade_in(samples, FADE_SECONDS, sample_rate)
+    if "fadeOut" in process:
+        samples = _fade_out(samples, FADE_SECONDS, sample_rate)
+    if "trimQuiet" in process:
+        samples = _trim_below(samples, TRIM_QUIET_DB)
+    if "maximize" in process:
+        samples = _maximize(samples, MAXIMIZE_DB)
+    return _write_float_wav(samples.tobytes(), 1, sample_rate)
+
+
+# ---- legacy Wave Bard transform (tune-to-C) ----------------------------
+
 def _trim_silence(samples: array.array) -> array.array:
     """Drop leading/trailing samples below ~-60 dB of the peak."""
     if not samples:
@@ -142,45 +264,12 @@ def _pitch_shift(pcm: bytes, factor: float, rate: int) -> bytes:
     )
 
 
-# ---- audio rows --------------------------------------------------------
-
-def to_spotykach(src: bytes) -> bytes:
-    """Canonical 48k stereo float32 WAV -> itself (re-encoded, tag 0x0003)."""
-    pcm = _decode_float(src, CANONICAL_CHANNELS, CANONICAL_RATE)
-    return _write_float_wav(pcm, CANONICAL_CHANNELS, CANONICAL_RATE)
-
-
-def to_sp404(src: bytes) -> bytes:
-    """Canonical -> 16-bit linear 48 kHz stereo WAV (SparkyMK2 native rate)."""
-    return _run(
-        ["-i", "pipe:0", "-ar", str(SP404_RATE), "-ac", "2",
-         "-c:a", "pcm_s16le", "-f", "wav", "-"],
-        stdin=src,
-    )
-
-
-def to_op1_drum(src: bytes, filename: str) -> bytes:
-    """Canonical -> AIFC (sowt) mono 44.1 kHz 16-bit, refusing > 12 s.
-
-    This is the raw audio container only. A usable OP-1 drum kit also needs the
-    FVER/APPL slice metadata that ``server.devices.op1.build_drum_kit`` adds by
-    reusing op1-web's drumkit; that module is the authoritative drum path.
-    """
-    mono = _decode_float(src, 1, OP1_RATE)  # measure duration from the mono decode
-    duration = len(mono) / 4 / OP1_RATE
-    if duration > OP1_DRUM_MAX_SECONDS:
-        raise ValueError(
-            f"{filename}: {duration:.1f}s exceeds the {OP1_DRUM_MAX_SECONDS:.0f}s drum cap"
-        )
-    return _run(
-        ["-i", "pipe:0", "-ar", str(OP1_RATE), "-ac", "1",
-         "-c:a", "pcm_s16le", "-f", "aiff", "-"],
-        stdin=src,
-    )
-
-
 def to_wave_bard(src: bytes) -> bytes:
-    """Canonical -> mono 48 kHz float32 WAV, tuned to nearest C, silence trimmed."""
+    """Legacy: canonical -> mono 48 kHz float32 WAV, tuned to C, silence trimmed.
+
+    Superseded by ``to_wave_bard_processed`` for the loader editor; retained as
+    a documented tune-to-nearest-C convenience transform.
+    """
     mono = _decode_float(src, 1, CANONICAL_RATE)
     samples = _trim_silence(_as_floats(mono))
     f0 = _detect_f0(samples, CANONICAL_RATE)
@@ -188,23 +277,3 @@ def to_wave_bard(src: bytes) -> bytes:
     pcm = _pitch_shift(samples.tobytes(), factor, CANONICAL_RATE) if abs(factor - 1.0) > 1e-6 \
         else samples.tobytes()
     return _write_float_wav(pcm, 1, CANONICAL_RATE)
-
-
-# ---- rhythm rows -------------------------------------------------------
-
-def _gate_pattern(step_data: dict) -> tuple[int, list[int]]:
-    steps = step_data.get("steps", 16)
-    gates = step_data.get("gates", [])
-    return steps, [i for i, g in enumerate(gates) if g]
-
-
-def wave_bard_rhythm(step_data: dict) -> dict:
-    """Step/gate JSON -> Wave Bard rhythm bank entry."""
-    steps, pattern = _gate_pattern(step_data)
-    return {"steps": steps, "pattern": pattern, "type": "rhythm"}
-
-
-def fx_wizard_rhythm(step_data: dict) -> dict:
-    """Step/gate JSON -> FX Wizard Chamber rhythm/step format."""
-    steps, pattern = _gate_pattern(step_data)
-    return {"step_count": steps, "pattern": pattern}

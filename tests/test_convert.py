@@ -147,8 +147,7 @@ from server.convert import (  # noqa: E402  (import after helpers)
     to_sp404,
     to_op1_drum,
     to_wave_bard,
-    wave_bard_rhythm,
-    fx_wizard_rhythm,
+    to_wave_bard_processed,
 )
 
 
@@ -209,24 +208,46 @@ def test_wave_bard_tunes_440_to_nearest_c():
     assert 505.0 < got < 542.0, f"tuned to {got:.1f} Hz, expected ~523.25"
 
 
-# ---- rhythm rows -------------------------------------------------------
+# ---- Wave Bard loader pipeline (quality + process toggles) ------------
 
-def _rhythm():
-    return {
-        "steps": 16,
-        "gates": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-        "cv": [0.8] * 16,
-    }
-
-
-def test_wave_bard_rhythm_maps_steps_and_pattern():
-    r = wave_bard_rhythm(_rhythm())
-    assert r["steps"] == 16
-    assert r["pattern"] == [0, 4, 8, 12]
-    assert r["type"] == "rhythm"
+def test_wave_bard_processed_is_mono_float_at_quality_rate():
+    out = to_wave_bard_processed(canonical_wav(), sample_rate=22050)
+    tag, channels, rate, bits = wav_fmt(out)
+    assert (tag, channels, bits) == (0x0003, 1, 32)
+    assert rate == 22050
 
 
-def test_fx_wizard_rhythm_maps_step_count():
-    r = fx_wizard_rhythm(_rhythm())
-    assert r["step_count"] == 16
-    assert r["pattern"] == [0, 4, 8, 12]
+def test_wave_bard_processed_trims_quiet_ends():
+    out = to_wave_bard_processed(
+        canonical_with_silence(tone_s=0.5), process=("trimQuiet",)
+    )
+    duration = wav_duration_s(out)
+    # ~0.5 s tone inside 1.5 s total; trim must drop the silent ends
+    assert 0.2 < duration < 0.8, f"trimmed duration {duration:.2f}s out of range"
+
+
+def test_wave_bard_processed_fade_does_not_change_header():
+    out = to_wave_bard_processed(canonical_wav(), process=("fadeIn", "fadeOut"))
+    tag, channels, rate, bits = wav_fmt(out)
+    assert (tag, channels, rate, bits) == (0x0003, 1, 44100, 32)
+
+
+def test_wave_bard_processed_maximize_peaks_near_minus_point_one_db():
+    src = canonical_wav(freq=440.0)
+    quiet = run_ffmpeg(
+        ["-i", "pipe:0", "-af", "volume=0.1", "-f", "wav", "-"], stdin=src
+    )
+    out = to_wave_bard_processed(quiet, process=("maximize",))
+    samples, _rate = float_samples_mono(out)
+    peak = max(abs(x) for x in samples)
+    target = 10.0 ** (-0.1 / 20.0)
+    assert abs(peak - target) < 0.05, f"peak {peak:.4f} not near {target:.4f}"
+
+
+def test_wave_bard_processed_rejects_unknown_rate():
+    try:
+        to_wave_bard_processed(canonical_wav(), sample_rate=12345)
+    except ValueError:
+        return
+    raise AssertionError("an unsupported quality rate should be refused")
+

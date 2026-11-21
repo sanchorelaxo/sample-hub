@@ -1,30 +1,49 @@
-"""FX Wizard stager — rhythm pattern + step count firmware draft.
+"""FX Wizard stager — rhythm set + sequencer length firmware draft.
 
 FX Wizard is a rhythm-only destination (a 9-mode FX processor); it never stores
-audio samples. v1 emits a "ready to flash" Chamber draft (rhythm + step count)
-mapped by ``convert.fx_wizard_rhythm``, to be baked into a ``.uf2`` by the
-Chamber flow (firmware 1.6+). No device I/O, so the draft is fully testable
-without hardware.
+audio samples. ``build_draft`` takes the full editor state (sequencer length plus
+a list of rhythms, each a ``steps`` bitmask — see server.pattern) and emits a
+"ready to flash" Chamber draft, to be baked into a ``.uf2`` by the Chamber flow
+(firmware 1.6+). No device I/O, so the draft is fully testable without hardware.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from server.convert import fx_wizard_rhythm
 from server.devices import READY_TO_FLASH
+from server.pattern import FX_WIZARD_DEFAULT_LENGTH, validate_fx_wizard
 
 
-def build_draft(step_data: dict, out_dir=None) -> dict:
-    """Step/gate JSON -> a "ready to flash" Chamber rhythm draft.
+def build_draft(state: dict, out_dir=None) -> dict:
+    """Full editor state -> a "ready to flash" Chamber rhythm-set draft.
 
-    With ``out_dir`` the draft is also written to ``<out_dir>/manifest.json``.
+    ``state`` carries ``sequencerLength`` and ``rhythms`` (a list of
+    ``{"id"?, "name", "steps"}``). Raises ``ValueError`` when the rhythm set
+    fails the loader's 3..64 limits. With ``out_dir`` the draft is also written
+    to ``<out_dir>/manifest.json``.
     """
+    rhythms = state.get("rhythms", [])
+    err = validate_fx_wizard(rhythms)
+    if err:
+        raise ValueError(err)
+
+    rhythms = [
+        {
+            "id": r.get("id") or f"r{i + 1}",
+            "name": r.get("name", f"rhythm {i + 1}"),
+            "steps": int(r["steps"]),
+        }
+        for i, r in enumerate(rhythms)
+    ]
+
     draft = {
         "state": READY_TO_FLASH,
         "target": "fx-wizard",
         "format": "chamber",
-        "rhythm": fx_wizard_rhythm(step_data),
+        "sequencerLength": int(state.get("sequencerLength", FX_WIZARD_DEFAULT_LENGTH)),
+        "rhythms": rhythms,
     }
     if out_dir is not None:
         out = Path(out_dir)

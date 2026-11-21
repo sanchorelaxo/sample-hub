@@ -75,6 +75,8 @@ def run_conversion(
     reason = reject_reason(source_type, target)
     if reason is not None:
         raise RejectError(reason)
+    if target in ("wave_bard", "fx_wizard"):
+        raise RejectError(f"{target!r} is authored in the editor; use run_draft")
 
     if target == "op1":
         result = op1.write_drum_kit(
@@ -98,26 +100,6 @@ def run_conversion(
             card_root=roots.get("sp404_card_root"),
             force=bool(params.get("force", False)),
         )
-    elif target == "wave_bard":
-        samples = (
-            [{"name": source_name, "data": source_payload}]
-            if source_type == "sample"
-            else []
-        )
-        rhythms = [source_payload] if source_type == "rhythm" else []
-        result = wave_bard.build_draft(
-            bank_name=params.get("bank", "bank-a"),
-            samples=samples,
-            rhythms=rhythms,
-            scales=[],
-            out_dir=roots.get("wave_bard_out")
-            or default_staging_dir() / "wave-bard",
-        )
-    elif target == "fx_wizard":
-        result = fx_wizard.build_draft(
-            source_payload,
-            out_dir=roots.get("fx_wizard_out"),
-        )
     else:
         raise RejectError(reason)
 
@@ -127,6 +109,31 @@ def run_conversion(
         "source_type": source_type,
         "result": result,
     }
+
+
+def run_draft(target: str, state: dict, roots: dict | None = None) -> dict:
+    """Assemble a firmware draft from a full editor ``state``.
+
+    ``state`` is the editor's serialized model — for Wave Bard, banks/scales/
+    rhythms/quality/process with each bank sample already resolved to canonical
+    ``data`` bytes; for FX Wizard, ``sequencerLength`` + ``rhythms``. Returns a
+    JSON-serializable ``{"target", "result"}`` where ``result`` is the draft.
+    Raises ``RejectError`` for a target without a draft builder.
+    """
+    roots = roots or {}
+    if target == "wave_bard":
+        result = wave_bard.build_draft(
+            state,
+            out_dir=roots.get("wave_bard_out") or default_staging_dir() / "wave-bard",
+        )
+    elif target == "fx_wizard":
+        result = fx_wizard.build_draft(
+            state,
+            out_dir=roots.get("fx_wizard_out"),
+        )
+    else:
+        raise RejectError(f"{target!r} has no draft builder")
+    return {"target": target, "result": result}
 
 
 _SENTINEL = object()

@@ -21,8 +21,9 @@ from pathlib import Path
 import pytest
 
 from server import jobs
-from server.jobs import JobQueue, RejectError, reject_reason, run_conversion
+from server.jobs import JobQueue, RejectError, reject_reason, run_conversion, run_draft
 from server.library import normalize
+from server.pattern import pattern_to_steps
 
 pytestmark = pytest.mark.skipif(
     shutil.which("ffmpeg") is None, reason="ffmpeg not installed"
@@ -95,49 +96,76 @@ def test_run_conversion_sample_to_sp404(tmp_path):
     assert (card_root / "IMPORT" / "kick.wav").is_file()
 
 
-def test_run_conversion_rhythm_to_fx_wizard(tmp_path):
+def test_run_conversion_rejects_editor_only_target():
     step_data = {"steps": 16, "gates": gates()}
+    with pytest.raises(RejectError) as exc:
+        run_conversion("hats", "rhythm", step_data, "fx_wizard")
+    assert "run_draft" in str(exc.value)
+
+
+def test_run_draft_fx_wizard(tmp_path):
+    state = {
+        "sequencerLength": 8,
+        "rhythms": [
+            {"name": "one", "steps": pattern_to_steps([0, 4], 8)},
+            {"name": "two", "steps": pattern_to_steps([2, 6], 8)},
+            {"name": "three", "steps": pattern_to_steps([1, 3, 5], 8)},
+        ],
+    }
     out_dir = tmp_path / "drafts"
 
-    result = run_conversion(
-        "hats", "rhythm", step_data, "fx_wizard",
-        roots={"fx_wizard_out": out_dir},
-    )
+    result = run_draft("fx_wizard", state, roots={"fx_wizard_out": out_dir})
 
-    assert result["result"]["state"] == "ready_to_flash"
-    assert result["result"]["target"] == "fx-wizard"
+    draft = result["result"]
+    assert draft["state"] == "ready_to_flash"
+    assert draft["target"] == "fx-wizard"
+    assert len(draft["rhythms"]) == 3
     assert (out_dir / "manifest.json").is_file()
 
 
-def test_run_conversion_sample_to_wave_bard(tmp_path):
+def test_run_draft_wave_bard(tmp_path):
     wav = make_canonical_wav(tmp_path, "kick")
+    state = {
+        "sampleRate": 44100,
+        "audioProcessing": {
+            "fadeIn": False, "fadeOut": False, "trimQuiet": False, "maximize": False,
+        },
+        "sequencerLength": 16,
+        "banks": [
+            {"name": "a", "samples": [
+                {"name": "kick", "data": wav},
+                {"name": "snare", "data": wav},
+                {"name": "hat", "data": wav},
+            ]},
+        ],
+        "scales": [
+            {"name": "major", "semitones": 0b101011010101},
+            {"name": "minor", "semitones": 0b101101011010},
+            {"name": "pent", "semitones": 0b101010010100},
+        ],
+        "rhythms": [
+            {"name": "one", "steps": pattern_to_steps([0, 4, 8, 12], 16)},
+            {"name": "two", "steps": pattern_to_steps([2, 6, 10, 14], 16)},
+            {"name": "three", "steps": pattern_to_steps([0, 8], 16)},
+        ],
+    }
     out_dir = tmp_path / "drafts"
 
-    result = run_conversion(
-        "kick.wav", "sample", wav, "wave_bard",
-        roots={"wave_bard_out": out_dir},
-    )
+    result = run_draft("wave_bard", state, roots={"wave_bard_out": out_dir})
 
     draft = result["result"]
     assert draft["state"] == "ready_to_flash"
-    assert len(draft["samples"]) == 1
-    assert draft["rhythms"] == []
+    assert draft["target"] == "wave-bard"
+    assert len(draft["banks"]) == 1
+    assert len(draft["banks"][0]["samples"]) == 3
+    assert len(draft["scales"]) == 3
+    assert len(draft["rhythms"]) == 3
     assert (out_dir / "manifest.json").is_file()
 
 
-def test_run_conversion_rhythm_to_wave_bard(tmp_path):
-    step_data = {"steps": 8, "gates": [True, False, True, False, True, False, True, False]}
-    out_dir = tmp_path / "drafts"
-
-    result = run_conversion(
-        "pulse", "rhythm", step_data, "wave_bard",
-        roots={"wave_bard_out": out_dir},
-    )
-
-    draft = result["result"]
-    assert draft["state"] == "ready_to_flash"
-    assert draft["samples"] == []
-    assert len(draft["rhythms"]) == 1
+def test_run_draft_unknown_target():
+    with pytest.raises(RejectError):
+        run_draft("op1", {})
 
 
 def test_job_queue_serializes_per_instrument(tmp_path):
