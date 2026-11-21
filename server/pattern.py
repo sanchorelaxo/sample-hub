@@ -3,7 +3,9 @@
 These are the pure data helpers shared by the server draft builders and the
 client editor. The wire format mirrors the Bastl web editors:
 
-  * rhythm  : ``{"name", "steps"}``      ``steps`` is an integer bitmask.
+  * rhythm  : ``{"name", "steps"}``      ``steps`` is an integer bitmask (the
+             client sends it as a decimal string so a 64-step mask survives
+             JSON; the server coerces it back to an int).
              Step ``p`` (0-based, first step = most significant) is active iff
              bit ``(length - 1 - p)`` is set. ``0`` means "empty" (invalid).
   * scale   : ``{"name", "semitones"}``  ``semitones`` is a 12-bit mask, bit
@@ -81,7 +83,9 @@ def validate_rhythms(rhythms: list[dict], minimum: int, maximum: int) -> str | N
     if not (minimum <= len(rhythms) <= maximum):
         return f"rhythms must be between {minimum} and {maximum} (got {len(rhythms)})"
     for rhythm in rhythms:
-        if not rhythm.get("steps", 0):
+        # ``steps`` may be a decimal string (the client uses BigInt so a
+        # 64-step mask survives JSON); coerce before the empty check.
+        if not int(rhythm.get("steps") or 0):
             return f"rhythm {rhythm.get('name', '?')!r} is empty"
     return None
 
@@ -90,7 +94,7 @@ def validate_scales(scales: list[dict], minimum: int, maximum: int) -> str | Non
     if not (minimum <= len(scales) <= maximum):
         return f"scales must be between {minimum} and {maximum} (got {len(scales)})"
     for scale in scales:
-        if not scale.get("semitones", 0):
+        if not int(scale.get("semitones") or 0):
             return f"scale {scale.get('name', '?')!r} is empty"
     return None
 

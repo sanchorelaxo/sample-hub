@@ -93,6 +93,27 @@ def test_validate_fx_wizard_rejects_empty_or_short():
     assert validate_fx_wizard(three) is None
 
 
+def test_steps_mask_is_64_bit_safe():
+    # A 64-step mask overflows a JSON number, so the client sends it as a
+    # decimal string; the validator must accept that form.
+    mask = 1 << 63
+    assert steps_to_pattern(mask, 64) == [0]
+    assert pattern_to_steps([0], 64) == mask
+    assert validate_fx_wizard([
+        {"name": "hi", "steps": str(mask)},
+        {"name": "mid", "steps": "1"},
+        {"name": "lo", "steps": "1"},
+    ]) is None
+
+
+def test_validate_rejects_string_zero_masks():
+    assert validate_fx_wizard([
+        {"name": "a", "steps": "0"},
+        {"name": "b", "steps": "1"},
+        {"name": "c", "steps": "1"},
+    ]) is not None
+
+
 def test_validate_wave_bard_requires_uniform_banks_and_valid_counts():
     bank = {"name": "b", "samples": [{"name": f"s{i}"} for i in range(3)]}
     scales = [{"name": n, "semitones": 1} for n in "abc"]
