@@ -25,8 +25,14 @@ DEFAULT_PORT = 8766
 CLIENT_DIR = Path(__file__).resolve().parent.parent / "client"
 
 
-def _live_roots(probe_fn=probe) -> dict:
+def _live_roots(target: str | None = None, probe_fn=None) -> dict:
     """Transfer roots read from one live status pass.
+
+    ``target`` is accepted and ignored: ``hub_server.make_server`` calls its
+    ``roots`` callable as ``target -> roots``, and the live probe enumerates
+    every present device and returns all their roots at once rather than
+    resolving a single target. ``probe_fn`` defaults to the live ``probe`` but
+    is injectable for tests.
 
     Only the two mount-backed targets need a root: the OP-1 mount and the
     SP-404 card root. Spotykach goes over USB CDC (no card root), and Wave
@@ -34,6 +40,8 @@ def _live_roots(probe_fn=probe) -> dict:
     present right now yields no root; a drop on its red pane is refused by the
     client before it would ever reach a writer.
     """
+    if probe_fn is None:
+        probe_fn = probe
     devices = {device.id: device for device in probe_fn(mounter=_udisksctl_mount)}
     roots: dict = {}
     op1 = devices.get("op1")
