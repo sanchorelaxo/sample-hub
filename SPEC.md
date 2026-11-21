@@ -4,10 +4,12 @@
 > instrument on the desk, doing the format conversion for each destination so a
 > drop always lands in a file the target can actually use.
 
-**Status:** implemented through milestone 10 (sink/source redesign) plus local
-`.uf2` bake and dry-run flash staging for Wave Bard and FX Wizard (§8).
-Remaining: the Bastl memory-usage budget, and the FX-vs-Bard UI toggle. This
-file is the contract the implementation is built against.
+**Status:** implemented through milestone 11 (sink/source redesign plus local
+`.uf2` bake and dry-run flash staging for Wave Bard and FX Wizard, §8).
+Remaining: the Bastl memory-usage budget, the FX-vs-Bard UI toggle, wiring
+`build_uf2` into the draft path with a flash endpoint, and a card-overflow
+scroll fix for tall device lists. This file is the contract the implementation
+is built against.
 
 ---
 
@@ -415,7 +417,7 @@ existing projects' test style.
    base firmware as a `.uf2` (`build_binary`/`build_uf2` in
    `server/devices/wave_bard.py` + `server/uf2.py`). No Bastl-loader handoff.
 7. **FX Wizard stager** — rhythm pattern + step count → firmware draft
-   (`build_draft`). The `k2fx` binary baker is still pending (§9).
+   (`build_draft`) and the `k2fx` binary baker (`build_binary`/`build_uf2`).
 8. **Status probe** — presence/transport detection per instrument (mount,
    `/dev/ttyACM*`, card, hub check for SP-404, RPI-RP2 update-mode detection
    for Wave Bard / FX Wizard), plus auto-mount of a visible but unmounted OP-1
@@ -433,7 +435,8 @@ existing projects' test style.
     read/generate/validate/merge), the Wave Bard `k2wb` baker (`build_binary`/
     `build_uf2` + `to_wave_bard_pcm16`), and `server/devices/flashable.py`
     (`find_boot_volumes` + `stage_uf2`, whose `dry_run=True` must always run
-    before any real write). Done for Wave Bard; FX Wizard `k2fx` pending.
+    before any real write). Done for both Wave Bard (`k2wb`) and FX Wizard
+    (`k2fx`).
 
 **First concrete step:** milestone 1, a failing test for the canonical
 normalizer (`tests/test_normalize.py`), then the smallest implementation that
@@ -453,19 +456,20 @@ passes.
   go directly into `IMPORT/` (subfolders inside it are shown on the unit).
   Unit-side import is `SHIFT+pad13 → UTILITY → IMPORT → IMPORT from SD-CARD →
   SAMPLE`. Writer targets top-level `IMPORT/` — confirmed correct.
-- **Wave Bard and FX Wizard `.uf2` generation offline** — Wave Bard RESOLVED
-  (2026-11-20). The `.uf2` is now baked locally: `server/uf2.py` ports Bastl's
+- **Wave Bard and FX Wizard `.uf2` generation offline** — RESOLVED (both,
+  2026-11-20). The `.uf2` is now baked locally: `server/uf2.py` ports Bastl's
   `uf2Utils.js` (RP2040 UF2 blocks at `USER_DATA_BEGIN = 0x10080000`, family
   `0xE48BFF56`) and `server/devices/wave_bard.py` ports `waveBardBinaryFormat.js`
   (the `k2wb` container: 20-byte header, then scales/rhythms/banks/samples as
   Int16 PCM, `ahoj` end marker), merged onto the vendor `*-no-samples.uf2` with
   `fill_gaps=True`. The `bastl-instruments/kastle2` toolchain was NOT required —
   the formats are a straight port of the loaders' JS. FX Wizard's `k2fx`
-  container (`fxWizardBinaryFormat.js`) is the same shape (rhythms only) but its
-  baker is still pending. Remaining: wire `build_uf2` into the draft path and a
-  flash endpoint, and resolve the base-firmware source (vendor file vs runtime
-  fetch). Both loaders save/load a "draft file", which the hub should read and
-  write so a user can round-trip their banks and rhythms.
+  container (`fxWizardBinaryFormat.js`) is the same shape (rhythms only), baked
+  by `server/devices/fx_wizard.py` (`build_binary`/`build_uf2`). Remaining: wire
+  `build_uf2` into the draft path and a flash endpoint, and resolve the
+  base-firmware source (vendor file vs runtime fetch). Both loaders save/load a
+  "draft file", which the hub should read and write so a user can round-trip
+  their banks and rhythms.
 - **SP-404 hub detection** — implemented in the M8 status probe: a hub-backed
   card reader reports amber "replug direct" (SPEC §2). Confirmed by synthetic
   sysfs tests; not yet verified against the real unit.

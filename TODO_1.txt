@@ -55,3 +55,7 @@ remaining / in flight (since milestone 10):
 
 [ ] wire build_uf2 into the draft path and add a flash endpoint; resolve the
     base-firmware source (vendor *-no-samples.uf2 vs runtime fetch).
+
+[ ] UI card overflow — with many entries listed a card runs off screen: add a
+    scroll bar when a card's list overflows, and keep each card's top on screen
+    (tall cards overflow downward only, never above the viewport top).
