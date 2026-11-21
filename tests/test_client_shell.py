@@ -109,6 +109,42 @@ def _bare_specifiers(text: str) -> list[str]:
     ]
 
 
+def _css_rules(css: str) -> list[tuple[str, str]]:
+    """Yield ``(selector, declarations)`` for each top-level CSS rule.
+
+    Strips comments, then brace-matches at depth 0. ``styles.css`` has no
+    braces inside strings, so a naive match is safe after the strip."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    rules = []
+    i, n = 0, len(css)
+    while i < n:
+        open_brace = css.find("{", i)
+        if open_brace == -1:
+            break
+        selector = css[i:open_brace].strip()
+        depth, j = 0, open_brace
+        while j < n:
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        rules.append((selector, css[open_brace + 1 : j]))
+        i = j + 1
+    return rules
+
+
+def _decls_for(css: str, selector: str) -> str | None:
+    """Declaration body of the first rule whose selector list contains
+    ``selector`` as a standalone selector (comma-split)."""
+    for sel, body in _css_rules(css):
+        if any(part.strip() == selector for part in sel.split(",")):
+            return body
+    return None
+
+
 def test_serves_shell_assets_no_store(shell):
     cases = [
         ("/", "text/html"),
@@ -178,6 +214,27 @@ def test_dragover_permits_drop_without_getdata():
     assert "readDrag" not in dragover, "dragover must not read the payload via getData"
     assert "activeDrag" in dragover, "dragover must read the dragstart-captured payload"
     assert "event.preventDefault()" in dragover, "dragover must permit the drop"
+
+
+def test_card_overflow_scrolls_within_viewport():
+    """TODO_1.txt (card overflow): a card whose list has many entries must
+    scroll internally, not run off the top of the screen. The pane is capped
+    to the viewport (max-height bound to 100vh) so a tall card's top stays on
+    screen, and the source/pending/job lists are the scrollable region
+    (overflow-y: auto) so the device label stays pinned while entries scroll."""
+    css = (CLIENT_DIR / "styles.css").read_text()
+    pane = _decls_for(css, ".pane")
+    assert pane is not None, "no .pane rule in styles.css"
+    assert re.search(r"max-height\s*:\s*[^;}]*100vh", pane), (
+        ".pane must cap its height to the viewport so a tall card's top stays "
+        "on screen"
+    )
+    for selector in (".source-list", ".pending", ".jobs"):
+        body = _decls_for(css, selector)
+        assert body is not None, f"no {selector} rule in styles.css"
+        assert re.search(r"overflow-y\s*:\s*auto", body), (
+            f"{selector} must scroll (overflow-y: auto) when the card overflows"
+        )
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

@@ -6,10 +6,9 @@
 
 **Status:** implemented through milestone 11 (sink/source redesign plus local
 `.uf2` bake and dry-run flash staging for Wave Bard and FX Wizard, §8).
-Remaining: the Bastl memory-usage budget, the FX-vs-Bard UI toggle, wiring
-`build_uf2` into the draft path with a flash endpoint, and a card-overflow
-scroll fix for tall device lists. This file is the contract the implementation
-is built against.
+Remaining: the Bastl memory-usage budget, the FX-vs-Bard UI toggle, and wiring
+`build_uf2` into the draft path with a flash endpoint. This file is the
+contract the implementation is built against.
 
 ---
 
