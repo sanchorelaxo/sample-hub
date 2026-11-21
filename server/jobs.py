@@ -89,9 +89,9 @@ def run_conversion(
         result = spotykach.write_sample(
             source_payload,
             tape=params.get("tape", spotykach.TAPE_ORDER[0]),
-            slot=int(params.get("slot", 1)),
             preferred=params.get("preferred", "usb"),
             card_root=roots.get("spotykach_card_root"),
+            archive_dir=roots.get("spotykach_archive_dir"),
         )
     elif target == "sp404":
         result = sp404.stage_import(

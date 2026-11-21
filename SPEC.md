@@ -6,7 +6,7 @@
 
 **Status:** implemented through milestone 11 (sink/source redesign plus local
 `.uf2` bake and dry-run flash staging for Wave Bard and FX Wizard, §8).
-Remaining: the Bastl memory-usage budget, the FX-vs-Bard UI toggle, and wiring
+Remaining: the FX-vs-Bard UI toggle, and wiring
 `build_uf2` into the draft path with a flash endpoint. This file is the
 contract the implementation is built against.
 
@@ -154,6 +154,7 @@ sample-hub/
       layout.js           rack geometry, one number per instrument position (mm)
       panes.js            DOM overlay panes (library, per-instrument, readouts)
       dragdrop.js         HTML5 DnD -> /api/convert
+      usage.js            Bastl memory-usage mirror (calculateUsage.js) + budget
       status.js           presence dot polling (20 s)
     styles.css
   tests/
@@ -248,7 +249,11 @@ stages a firmware draft (manifest + resolved samples) and returns a job id; the
 pane shows the job like any other transfer. The client validates locally before
 submitting (rhythm and scale counts, uniform bank sizes) so the save button
 stays disabled until the draft is legal — mirroring `validate_wave_bard` /
-`validate_fx_wizard` on the server.
+`validate_fx_wizard` on the server. The footer also shows a live memory readout
+(`<used> / 7.5 MiB`) computed from the same `calculateUsage.js` formula the
+Bastl loaders use, and blocks the save with an "over the memory budget" error
+when the draft would exceed the 7.5 MiB `memorySize` guard (server-side
+`BASTL_MEMORY_SIZE` stays authoritative for the exact Int16 PCM size).
 
 Step and semitone data are integer bitmasks. A 64-step mask overflows a JSON
 number, so the client stores `steps` as a decimal string backed by BigInt and
@@ -316,9 +321,10 @@ to flash" signal and auto-mounts each RPI-RP2 volume (two at once mount as
 - **Invalid drops** (wrong asset type, over length cap, red pane) are rejected
   inline with the specific reason — "42 s stored cap", "rhythms only",
   "replug direct" — not a generic error.
-- **No deletes, ever.** Bump/append on Spotykach archives the overflow; OP-1
-  and SP-404 writes are additive. The UI offers no delete affordance in v1.
-  (This mirrors the existing tools' read-back-and-archive discipline.)
+- **No deletes, ever.** Spotykach drops append to the first empty slot (nothing
+  shifts or falls off); OP-1 and SP-404 writes are additive. The UI offers no
+  delete affordance in v1. (This mirrors the existing tools' read-back
+  discipline.)
 
 ### Conversion matrix shown to the user
 
@@ -329,7 +335,7 @@ so the conversion is never a surprise:
 |---|---|
 | OP-1 drum | mono 44.1 kHz AIFC, ≤ 12 s, `drum/user/<name>.aif` |
 | OP-1 synth/tape | 44.1 kHz AIFC, target folder chosen by drop zone |
-| Spotykach | 48 kHz stereo float32 WAV, next slot (bump/append chosen by drop zone) |
+| Spotykach | 48 kHz stereo float32 WAV, first empty slot (append) |
 | Wave Bard (sample) | tuned-to-C mono sample staged into a bank |
 | Wave Bard (rhythm) | rhythm pattern + step count staged into the firmware draft |
 | FX Wizard (rhythm) | rhythm pattern + step count → `.uf2`, "generate firmware" button |
@@ -387,11 +393,13 @@ Borrowed directly from the two tools that already solved these problems:
   only then open the device. A Spotykach in transfer mode times out on silence,
   so the link opens immediately before the write, never across a download or
   ffmpeg pass.
-- **Read back and compare.** Spotykach bump moves run far-end-backwards with a
-  read-back per move; a dropped transfer after bytes hit the tape is reported,
-  never re-run (the slot shift is not idempotent).
-- **Archive, never delete.** Overflow goes to card ROOT or host cache; nothing
-  is silently discarded.
+- **Read back and compare.** A Spotykach append writes one slot and reads it
+  back to verify; a dropped transfer after bytes hit the tape is reported,
+  never re-run (a retry would append to the next empty slot, so it is not
+  idempotent).
+- **Never delete.** Spotykach append stops at a full chain with an error
+  ("free a slot on the unit") rather than overwriting or discarding; nothing is
+  ever silently discarded.
 - **Loopback only.** `127.0.0.1`, JSON POSTs, no external bind.
 
 ---

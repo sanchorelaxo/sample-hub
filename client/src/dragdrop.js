@@ -49,6 +49,7 @@ export function wireDragDrop(handle, onChanged) {
           sourceDevice: item.dataset.sourceDevice,
           sourceRef: item.dataset.sourceRef,
           sourceType: item.dataset.sourceType || "sample",
+          sourceBytes: item.dataset.sourceBytes || "0",
         };
         event.dataTransfer.setData(DROP_TYPE, JSON.stringify(activeDrag));
         event.dataTransfer.effectAllowed = "copy";
@@ -106,7 +107,7 @@ export function wireDragDrop(handle, onChanged) {
         openEditor(
           pane.device,
           data.sourceType === "sample"
-            ? { kind: "sample", sourceDevice: data.sourceDevice, sourceRef: data.sourceRef }
+            ? { kind: "sample", sourceDevice: data.sourceDevice, sourceRef: data.sourceRef, sourceBytes: data.sourceBytes }
             : { kind: "rhythm", name: data.sourceRef },
         );
         return;

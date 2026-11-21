@@ -10,6 +10,8 @@
 // full 64-step mask round-trips through JSON, matching server/pattern.py's
 // integer bitmask (first step = most significant bit).
 
+import { BASTL_MEMORY_SIZE, formatMiB, waveBardUsage } from "./usage.js";
+
 const DROP_TYPE = "application/x-sample-hub";
 
 const SEQUENCER_CLASSICS = [8, 16, 32, 64];
@@ -388,6 +390,7 @@ function wireBankDrop(list, bank) {
       name: leafName(data.sourceRef),
       source_device: data.sourceDevice,
       source_ref: data.sourceRef,
+      bytes: Number(data.sourceBytes) || 0,
     });
     render();
   });
@@ -430,6 +433,15 @@ function validateState() {
   return checkList(state.rhythms, FX_WIZARD_RHYTHMS, "rhythm", (r) => r.steps);
 }
 
+function memoryUsage() {
+  if (!isWaveBard()) return 0;
+  return waveBardUsage({
+    scales: state.scales,
+    rhythms: state.rhythms,
+    banks: state.banks,
+  });
+}
+
 function updateStatus() {
   const el = ensureEls();
   const err = validateState();
@@ -441,9 +453,17 @@ function updateStatus() {
   }
   if (isWaveBard()) {
     const n = state.banks.length;
+    const used = memoryUsage();
+    const readout = `${formatMiB(used)} / ${formatMiB(BASTL_MEMORY_SIZE)}`;
+    if (used > BASTL_MEMORY_SIZE) {
+      el.status.textContent = `${readout} — over the ${formatMiB(BASTL_MEMORY_SIZE)} memory budget`;
+      el.status.className = "editor-status error";
+      el.save.disabled = true;
+      return;
+    }
     el.status.textContent =
       `${state.rhythms.length} rhythms · ${state.scales.length} scales · ` +
-      `${n} bank${n === 1 ? "" : "s"} · ready`;
+      `${n} bank${n === 1 ? "" : "s"} · ${readout} · ready`;
   } else {
     el.status.textContent = `${state.rhythms.length} rhythms · ready`;
   }
@@ -477,7 +497,7 @@ export function serialize() {
 
 async function saveDraft() {
   const el = ensureEls();
-  if (validateState() || !onApply) return;
+  if (validateState() || memoryUsage() > BASTL_MEMORY_SIZE || !onApply) return;
   el.save.disabled = true;
   el.save.textContent = "applying…";
   const ok = await onApply(serialize());
@@ -499,6 +519,7 @@ function applySeed(seed) {
       name: leafName(seed.sourceRef),
       source_device: seed.sourceDevice,
       source_ref: seed.sourceRef,
+      bytes: Number(seed.sourceBytes) || 0,
     });
   } else if (seed.kind === "rhythm") {
     state.rhythms.push({

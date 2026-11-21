@@ -1,8 +1,9 @@
 """Milestone 3 — Spotykach writer, device-free + gated real-device.
 
 The matrix's Spotykach output (48 kHz stereo float32 WAV) must be exactly what
-``sk_usb.DEVICE_FORMAT`` accepts, and the writer must place it in a slot via the
-existing transport. Device-free tests drive the real ``CardTransport`` (plain
+``sk_usb.DEVICE_FORMAT`` accepts, and the writer must place it in the first
+empty slot of the ``B G P R T Y`` chain using *append* mode — nothing shifts.
+Device-free tests drive the real ``CardTransport`` (plain
 ``SK/<tape>/<slot>.WAV`` files) — no mocks. The USB path is exercised behind
 ``--real-devices``.
 """
@@ -16,7 +17,6 @@ from server.convert import to_spotykach
 from server.devices.spotykach import (
     SLOTS_PER_TAPE,
     TAPE_ORDER,
-    SkLink,
     find_midi_port,
     find_serial_port,
     validate,
@@ -68,48 +68,69 @@ def test_matrix_output_is_uploadable():
     assert validate(out) == []
 
 
-def test_write_sample_via_card_transport(tmp_path):
-    """Real CardTransport writes the exact bytes to SK/<tape>/<slot>.WAV."""
+def test_write_sample_appends_to_first_free_slot(tmp_path):
+    """An empty card takes the sample at B/1 via append (nothing shifts)."""
     (tmp_path / "SK").mkdir()
     data = to_spotykach(canonical_wav())
-    written = write_sample(data, "B", 1, preferred="card", card_root=str(tmp_path))
-    slot_file = tmp_path / "SK" / "B" / "1.WAV"
-    assert slot_file.read_bytes() == data
-    assert written == len(data)
+    placement = write_sample(data, "B", preferred="card", card_root=str(tmp_path))
+    assert placement == {
+        "transport": "card",
+        "tape": "B",
+        "slot": 1,
+        "shifted": 0,
+        "archived": None,
+        "detail": f"{len(data):,} bytes verified",
+    }
+    assert (tmp_path / "SK" / "B" / "1.WAV").read_bytes() == data
+
+
+def test_write_sample_appends_past_occupied_slot(tmp_path):
+    """Append lands on the first empty slot and moves nothing."""
+    (tmp_path / "SK").mkdir()
+    first = to_spotykach(canonical_wav(freq=440.0))
+    second = to_spotykach(canonical_wav(freq=660.0))
+    p1 = write_sample(first, "B", preferred="card", card_root=str(tmp_path))
+    p2 = write_sample(second, "B", preferred="card", card_root=str(tmp_path))
+    assert (p1["tape"], p1["slot"]) == ("B", 1)
+    assert (p2["tape"], p2["slot"]) == ("B", 2)
+    assert p2["shifted"] == 0
+    assert p2["archived"] is None
+    # The first sample was not moved or overwritten.
+    assert (tmp_path / "SK" / "B" / "1.WAV").read_bytes() == first
+    assert (tmp_path / "SK" / "B" / "2.WAV").read_bytes() == second
 
 
 def test_write_sample_rejects_wrong_format(tmp_path):
     """Non-canonical bytes are refused before any transport opens."""
     (tmp_path / "SK").mkdir()
     with pytest.raises(ValueError, match="sample_rate"):
-        write_sample(noncanonical_wav(), "B", 1, preferred="card", card_root=str(tmp_path))
+        write_sample(noncanonical_wav(), "B", preferred="card", card_root=str(tmp_path))
     assert not (tmp_path / "SK" / "B").exists()
 
 
-def test_write_sample_rejects_bad_tape_or_slot(tmp_path):
+def test_write_sample_rejects_bad_tape(tmp_path):
     (tmp_path / "SK").mkdir()
     data = to_spotykach(canonical_wav())
     with pytest.raises(ValueError, match="tape"):
-        write_sample(data, "Z", 1, preferred="card", card_root=str(tmp_path))
-    with pytest.raises(ValueError, match="slot"):
-        write_sample(data, "B", SLOTS_PER_TAPE + 1, preferred="card", card_root=str(tmp_path))
+        write_sample(data, "Z", preferred="card", card_root=str(tmp_path))
     assert TAPE_ORDER == "BGPRTY"
 
 
 # ---- real device (gated) ------------------------------------------------
 
 @pytest.mark.real_devices
-def test_spotykach_presence_and_handshake():
-    """Read-only: confirm the unit is present, and handshake if already in
-    transfer mode. Never switches modes or writes a slot, so it is safe."""
-    port = find_serial_port()
-    if port is None:
-        assert find_midi_port() is not None, "no Spotykach in either mode"
-        pytest.skip("Spotykach present in MIDI mode; serial handshake needs transfer mode")
-    link = SkLink(port)
-    try:
-        info = link.hello()
-        assert info.proto_major == 1
-        assert info.slots >= 1
-    finally:
-        link.close()
+def test_spotykach_appends_a_sample():
+    """Place a real sample on the unit via append mode (first empty slot).
+
+    Append never moves or overwrites an occupied slot, so this is safe on a
+    live unit; it only fills one empty slot and reads it back to verify.
+    """
+    if find_serial_port() is None and find_midi_port() is None:
+        pytest.skip("no Spotykach present")
+    data = to_spotykach(canonical_wav(seconds=0.5))
+    placement = write_sample(data, "B", preferred="usb")
+    assert placement["transport"] == "usb"
+    assert placement["tape"] in TAPE_ORDER
+    assert 1 <= placement["slot"] <= SLOTS_PER_TAPE
+    assert placement["shifted"] == 0
+    assert placement["archived"] is None

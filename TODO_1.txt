@@ -47,8 +47,11 @@ remaining / in flight (since milestone 10):
     smp_to_wav -> normalize_bytes. Device-free tested in tests/test_smp.py
     (8) + tests/test_sources.py (2 listing/read-back).
 
-[ ] Bastl memory-usage budget (7.5 MB, both targets) enforcement + a usage
-    indicator, mirroring the Bastl loaders' memorySize guard.
+[x] Bastl memory-usage budget (7.5 MB, both targets) enforcement + a usage
+    indicator, mirroring the Bastl loaders' memorySize guard. Server guard in
+    server/pattern.py (BASTL_MEMORY_SIZE, 7_864_320) + both bakers raise on
+    overflow; client indicator in client/src/usage.js, wired into the editor
+    status footer with the same budget and formula.
 
 [ ] UI Bastl config toggle (FX vs Bard) that tells the backend which target a
     firmware draft is for.

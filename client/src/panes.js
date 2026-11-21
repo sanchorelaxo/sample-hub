@@ -53,6 +53,7 @@ export function renderSource(handle, deviceId, entries) {
     li.dataset.sourceDevice = deviceId;
     li.dataset.sourceRef = entry.rel;
     li.dataset.sourceType = entry.type || "sample";
+    li.dataset.sourceBytes = entry.bytes ?? "";
     const badge = document.createElement("span");
     badge.className = "badge sample";
     badge.textContent = (entry.rel.split(".").pop() || "wav").toLowerCase();

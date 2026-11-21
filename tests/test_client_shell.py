@@ -41,6 +41,7 @@ SRC_FILES = [
     "src/panes.js",
     "src/dragdrop.js",
     "src/editor.js",
+    "src/usage.js",
     "src/status.js",
     "src/staging.js",
 ]

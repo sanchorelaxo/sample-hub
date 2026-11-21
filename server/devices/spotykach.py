@@ -60,27 +60,28 @@ def validate(data: bytes, info=None) -> list[str]:
     return check_uploadable(data, info)
 
 
-def write_sample(data, tape, slot, preferred="usb", card_root=None, archive_dir=None):
-    """Upload canonical WAV bytes into a Spotykach slot (USB transfer transport).
+def write_sample(data, tape, preferred="usb", card_root=None, archive_dir=None):
+    """Upload canonical WAV bytes into the first empty Spotykach slot (append).
 
-    Validates the bytes against the device format and the tape/slot bounds
-    *before* opening any transport, then writes through the existing transport
-    and closes it. Returns the number of bytes written.
+    Validates the bytes against the device format and the tape name *before*
+    opening any transport, then places the sample through ``install_sample`` in
+    append mode: the first empty slot of the ``B G P R T Y`` chain starting at
+    ``tape``, nothing shifted. Returns the placement as a dict
+    (transport/tape/slot/shifted/archived/detail).
     """
-    slot = int(slot)
     problems = check_uploadable(data, None)
     if problems:
         raise ValueError("Spotykach can't load this file: " + " ".join(problems))
     if tape not in TAPE_ORDER:
         raise ValueError(f"unknown tape {tape!r} (tapes are {TAPE_ORDER})")
-    if not (1 <= slot <= SLOTS_PER_TAPE):
-        raise ValueError(f"slot {slot} out of range 1..{SLOTS_PER_TAPE}")
     transport = sk_install.open_transport(preferred, card_root=card_root, archive_dir=archive_dir)
     try:
-        transport.write(tape, slot, data)
+        placement = sk_install.install_sample(
+            transport, tape, data, archive_dir=archive_dir, mode="append"
+        )
     finally:
         transport.close()
-    return len(data)
+    return placement.as_dict()
 
 
 __all__ = [
