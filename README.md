@@ -4,8 +4,8 @@
 > on the desk, doing the format conversion for each destination so a drop
 > always lands in a file the target can actually use.
 
-Status: milestone 10 — sink/source redesign (device tree, source panes,
-staged transfers). See SPEC.md for the full contract.
+Status: milestone 11 — local `.uf2` bake (Wave Bard `k2wb`, FX Wizard `k2fx`) +
+dry-run-gated UF2 flash staging. See SPEC.md for the full contract.
 
 ![rack client](docs/screenshot.png)
 
@@ -44,13 +44,50 @@ Cancel / Undo live in the lower-right bar. Apply commits everything (labelled
 "Apply (and flash)" when any staged sink is flashable), Cancel clears all, Undo
 removes only the last change.
 
+The SP-404 source reads both `EXPORT/SAMPLE/*.WAV` and
+`EXPORT/PROJECT/*/SMPL/*.SMP`. SMP is the MK2 `RFWV` container, decoded by
+`server/smp.py` (512-byte header + big-endian 16-bit 48 kHz PCM, MD5-verified)
+into canonical float32 WAV before conversion — verified against a live MK2 SD
+card.
+
 Flashable Bastl sinks (Wave Bard, FX Wizard) are not drop-and-send targets:
 dropping onto one opens a firmware editor overlay (`client/src/editor.js`) that
 reproduces the Bastl web loaders — a rhythm editor + sequencer-length selector,
 and for Wave Bard a scales editor, a process-samples selector, quality, and
-sample banks. Save POSTs the full state to `/api/draft`, which bakes a `.uf2`
-draft via `server/pattern.py` (the rhythm/scale bitmask model) and the
-per-target writers in `server/devices/`.
+sample banks. Save POSTs the full state to `/api/draft`, which stages a
+firmware draft (a `manifest.json` plus the resolved sample WAVs) via the
+per-target `build_draft` writers in `server/devices/` (the rhythm/scale
+bitmask model lives in `server/pattern.py`). The `.uf2` bake is the next
+milestone (below).
+
+## Milestone 11: local .uf2 bake + dry-run flash staging
+
+Flashable Bastl firmware no longer needs the Bastl web loaders. `server/uf2.py`
+ports Bastl's `uf2Utils.js`: it reads, generates, validates, and merges the
+RP2040 UF2 block format (256-byte payload per 512-byte block, family
+`0xE48BFF56`, user data at `0x10080000`). `server/devices/wave_bard.py` adds
+the `k2wb` baker — `build_binary` (full editor state → the `k2wb` container,
+port of `waveBardBinaryFormat.js`) and `build_uf2` (state → `k2wb` → UF2 blocks
+merged onto the vendor `*-no-samples.uf2` with `fill_gaps=True`), with samples
+quantized to Int16 by `convert.to_wave_bard_pcm16`. Verified against a real
+`kastle2-wave-bard-1.7-no-samples.uf2`: the base program region ends ~86 KB
+below the user-data region and the gap is zero-filled, so the merged image
+round-trips exactly. `server/devices/fx_wizard.py` adds the `k2fx` baker the
+same way — `build_binary` (editor state → the `k2fx` container, port of
+`fxWizardBinaryFormat.js`: magic `k2fx`, a rhythm count + sequencer length, one
+u32 `steps` mask per rhythm, `ahoj` end marker) and `build_uf2` (state → `k2fx`
+→ UF2 blocks merged onto the vendor `kastle2-fx-wizard-*.uf2`). FX Wizard is
+rhythm-only, so the container carries no audio samples.
+
+`server/devices/flashable.py` stages the actual write: `find_boot_volumes()`
+discovers RP2040 UF2 boot volumes (`INFO_UF2.TXT`), and `stage_uf2(...)` copies
+a `.uf2` onto one. Writing flashes and resets the unit, so `stage_uf2` always
+runs `dry_run=True` first and only writes when explicitly set to
+`dry_run=False`.
+
+Pending: wiring `build_uf2` into the draft path, a flash endpoint and the
+base-firmware source, the Bastl memory-usage budget (7.5 MB), and the FX-vs-Bard
+UI toggle.
 
 ## Milestone 9: server + rack client
 
@@ -94,7 +131,13 @@ back, so every assertion runs against real bytes, never a mock. Client-shell
 tests serve the real `client/` directory and assert the assets are served with
 `no-store`, that every module import is relative and resolves (no CDN), that
 each source module parses as an ES module, and that the client derives its
-rack from `/api/devices` rather than a hardcoded list.
+track from `/api/devices` rather than a hardcoded list.
+
+The UF2 bake is covered device-free: `test_uf2.py` (block format, byte-exact),
+`test_wave_bard_bake.py` (`k2wb` encode + merge onto a base firmware), and
+`test_flashable.py` (`stage_uf2` dry-run + write against a fake boot volume).
+The real-device flash test (`test_bastl_flash.py`) is read-only — it discovers
+and validates the boot volume but never copies a `.uf2` onto it.
 
 Real-device tests are gated off by default. Tests that talk to a physical USB
 instrument are marked `@pytest.mark.real_devices` and only run when you opt in:
@@ -110,7 +153,8 @@ instrument are marked `@pytest.mark.real_devices` and only run when you opt in:
     server/sources.py      source-device listing + read-back (10)
     server/library.py      host cache + canonical normalizer (milestones 1, 9a)
     server/convert.py      conversion matrix, one fn per target
-    server/devices/        per-target writers (op1, spotykach, wave_bard, ...)
+    server/uf2.py          UF2 read/generate/validate/merge (11)
+    server/devices/        per-target writers + flashable.py (flash staging) (11)
     server/jobs.py         convert dispatch + per-instrument job queue (9b)
     server/status.py       per-instrument presence probe (milestone 8)
     server/pattern.py      rhythm/scale bitmask model + Bastl validation (10)

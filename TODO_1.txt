@@ -1,19 +1,57 @@
 a few changes are needed:
 
-for devices, we have to distinguish between sink-only (cant get samples from) source-only (cant get samples to) and si
-nk-source options (bi-directional): wave bard and fx wizard are sink-only, spotykach is sink only, sp404 card is sink-
-source (export is source dir, import is sink dir), op1 is also both (sink-source).
+[all done — see git log, milestones 1-10]
+
+for devices, we have to distinguish between sink-only (cant get samples from) source-only (cant get samples to) and sink-source options (bi-directional): wave bard and fx wizard are sink-only, spotykach is sink only, sp404 card is sink-source (export is source dir, import is sink dir), op1 is also both (sink-source).
+  -> done: server/devices.json device tree + server/device_tree.py (milestone 10)
 
 as in op1-web, sources have to show their content and each file be draggable
+  -> done: source panes via GET /api/devices/<id>/source (milestone 10)
 
 eliminate library. drag-n-drop will work only between sinks and sources (will show red x when dragging onto illegal sink/source xfer, not allowing the drag-n-drop)
+  -> done: no library pane; legal-only DnD with red-x refuse (milestone 10)
 
 isFlashable boolean: if true (like wave bard or fx wizard), changes to device would require a firmware update
+  -> done: is_flashable in devices.json, "Apply (and flash)" label (milestone 10)
 
-in fact, client side architecture should be changed for showing staged files xfers (after user is done dragging files acros various devices), the pending changes shuld be listed in the sink's card, and and Apply button appear
-s in lower right as soon as changes are to be made (if isFlashable devices also have pending changes, button label changes to 'Apply (and flash)' . Cancel button unstages everything, Undo button only unstages last change
+in fact, client side architecture should be changed for showing staged files xfers (after user is done dragging files across various devices), the pending changes should be listed in the sink's card, and an Apply button appears in lower right as soon as changes are to be made (if isFlashable devices also have pending changes, button label changes to 'Apply (and flash)'. Cancel button unstages everything, Undo button only unstages last change
+  -> done: staged transfers + Apply / Cancel / Undo (milestone 10)
 
-i want to be able to add devices by adding to a json tree. externalize them and necessary params and also mov
-e any global or app params/vars/flags into the tree too
+i want to be able to add devices by adding to a json tree. externalize them and necessary params and also move any global or app params/vars/flags into the tree too
+  -> done: server/devices.json is the single source of truth (milestone 10)
 
 merge Spotykach USB-MIDI presence detection changes now, will debug later
+  -> done: status probe (milestone 8)
+
+------------------------------------------------------------------
+
+remaining / in flight (since milestone 10):
+
+[x] local .uf2 bake for Wave Bard — k2wb binary (server/devices/wave_bard.py
+    build_binary/build_uf2) + UF2 read/generate/validate/merge (server/uf2.py),
+    device-free tested. No Bastl-loader handoff.
+
+[x] dry-run-gated UF2 flash staging — find_boot_volumes + stage_uf2 in
+    server/devices/flashable.py (dry_run=True always runs before any real write).
+
+[x] local .uf2 bake for FX Wizard — k2fx binary baker
+    (server/devices/fx_wizard.py build_binary/build_uf2/encode_binary), port of
+    fxWizardBinaryFormat.js (magic k2fx, u32 rhythm masks, ahoj end marker).
+    device-free tested in tests/test_fx_wizard_bake.py; real-device boot-volume
+    discovery verified against a connected FX Wizard in UF2 boot mode.
+
+[x] SP-404 card source reads both WAV and SMP — add .smp to
+    _SP404_EXPORT_SUFFIXES; server/smp.py decodes the RFWV container (512-byte
+    header + big-endian 16-bit 48 kHz PCM, MD5-digest verified) ported from
+    SparkyMK2 crates/sp404-formats/src/smp.rs; read_source routes .smp through
+    smp_to_wav -> normalize_bytes. Device-free tested in tests/test_smp.py
+    (8) + tests/test_sources.py (2 listing/read-back).
+
+[ ] Bastl memory-usage budget (7.5 MB, both targets) enforcement + a usage
+    indicator, mirroring the Bastl loaders' memorySize guard.
+
+[ ] UI Bastl config toggle (FX vs Bard) that tells the backend which target a
+    firmware draft is for.
+
+[ ] wire build_uf2 into the draft path and add a flash endpoint; resolve the
+    base-firmware source (vendor *-no-samples.uf2 vs runtime fetch).

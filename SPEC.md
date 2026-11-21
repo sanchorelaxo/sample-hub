@@ -4,8 +4,10 @@
 > instrument on the desk, doing the format conversion for each destination so a
 > drop always lands in a file the target can actually use.
 
-**Status:** specification only. No code yet. This file is the contract the
-implementation is built against.
+**Status:** implemented through milestone 10 (sink/source redesign) plus local
+`.uf2` bake and dry-run flash staging for Wave Bard and FX Wizard (§8).
+Remaining: the Bastl memory-usage budget, and the FX-vs-Bard UI toggle. This
+file is the contract the implementation is built against.
 
 ---
 
@@ -132,12 +134,15 @@ sample-hub/
     hub_server.py         HTTP server, stdlib only, loopback bind
     library.py            host cache + canonical-format normalization
     convert.py            the conversion matrix (§6), one fn per target
+    uf2.py                UF2 read/generate/validate/merge (Kastle 2 RP2040)
+    pattern.py            rhythm/scale bitmask model + Bastl validation
     devices/
       op1.py              reuse op1-web AIFC path
       spotykach.py        reuse spottytube transport
-      wave_bard.py        .uf2 staging writer (samples + rhythms + scales)
-      fx_wizard.py        .uf2 staging writer (rhythms + step count)
+      wave_bard.py        k2wb .uf2 baker + draft staging (samples + rhythms + scales)
+      fx_wizard.py        k2fx .uf2 baker + draft staging (rhythms + step count)
       sp404.py            SD IMPORT folder writer
+      flashable.py        RP2040 boot-volume discovery + dry-run-gated stage_uf2
     status.py             per-instrument presence probe
   client/
     index.html
@@ -176,9 +181,12 @@ canonical, converts for the target, transfers, and returns the on-device
 result. `/api/draft` is the authoring path for flashable Bastl sinks: it takes
 the whole editor state (rhythms, sequencer length, and for Wave Bard scales,
 process toggles, quality, and sample banks), resolves each bank sample to
-canonical WAV bytes server-side, bakes a `.uf2` draft, and returns a job id.
-Directly converting to `wave_bard` or `fx_wizard` via `/api/convert` is refused
-— those targets are authored in the editor, not dropped as one-shot jobs.
+canonical WAV bytes server-side, stages a firmware draft (a `manifest.json`
+plus the resolved sample WAVs via the target's `build_draft`), and returns a
+job id. The `.uf2` bake itself is `build_binary`/`build_uf2` — implemented for
+Wave Bard and device-free tested, but not yet wired to an endpoint. Directly
+converting to `wave_bard` or `fx_wizard` via `/api/convert` is refused — those
+targets are authored in the editor, not dropped as one-shot jobs.
 
 ---
 
@@ -235,11 +243,11 @@ the two Bastl web loaders:
   a dropped sample seeds the first bank, and each bank is a drop zone for more.
 
 Save ("Apply (and flash)") serializes the state and POSTs `/api/draft`, which
-bakes a `.uf2` firmware draft and returns a job id; the pane shows the job like
-any other transfer. The client validates locally before submitting (rhythm and
-scale counts, uniform bank sizes) so the save button stays disabled until the
-draft is legal — mirroring `validate_wave_bard` / `validate_fx_wizard` on the
-server.
+stages a firmware draft (manifest + resolved samples) and returns a job id; the
+pane shows the job like any other transfer. The client validates locally before
+submitting (rhythm and scale counts, uniform bank sizes) so the save button
+stays disabled until the draft is legal — mirroring `validate_wave_bard` /
+`validate_fx_wizard` on the server.
 
 Step and semitone data are integer bitmasks. A 64-step mask overflows a JSON
 number, so the client stores `steps` as a decimal string backed by BigInt and
@@ -291,6 +299,10 @@ to flash" signal and auto-mounts each RPI-RP2 volume (two at once mount as
 
 - **Draggable sources:** Library entries (samples and rhythms); OP-1 disk
   entries; Spotykach slots; SP-404 SD entries.
+- **SP-404 source formats:** `EXPORT/SAMPLE/*.WAV` and
+  `EXPORT/PROJECT/*/SMPL/*.SMP`. SMP is the MK2 `RFWV` container (512-byte
+  header + big-endian 16-bit 48 kHz PCM, MD5-digest verified); `server/smp.py`
+  decodes it to WAV and it normalizes like any other source.
 - **Valid targets, by asset type:**
   - *samples* → OP-1, Spotykach, Wave Bard, SP-404.
   - *rhythms* → Wave Bard, FX Wizard.
@@ -337,7 +349,7 @@ without hardware.
 | OP-1 drum kit | 48k f32 stereo | AIFC, mono, 44.1 kHz, ≤ 12 s | downmix → downsample → write AIFC container (reuse op1-web) |
 | OP-1 synth/tape | 48k f32 stereo | AIFC, 44.1 kHz | downsample → write AIFC |
 | Spotykach | 48k f32 stereo | 48k f32 stereo WAV ≤ 42 s stored | retime if needed (speed pass), else pass-through |
-| Wave Bard | 48k f32 stereo | mono WAV, tuned C, silence trimmed | downmix → pitch-to-C → trim → feed loader inputs |
+| Wave Bard | 48k f32 stereo | mono Int16 PCM at the selected quality rate, packed into the `k2wb` image | downmix → process (fade/trim/maximize) → quantize to Int16 → pack `k2wb` binary |
 | SP-404 | 48k f32 stereo | 16-bit linear WAV | keep 48 kHz (device-native rate) → dither to 16-bit |
 
 > SP-404 rate reference: the authoritative source is
@@ -398,10 +410,12 @@ existing projects' test style.
 4. **OP-1 writer** — reuse `op1-web`'s AIFC path; matrix output → `drum/user/`.
 5. **SP-404 writer** — 16-bit WAV → SD `IMPORT/` folder. Test the bytes, not a
    real card.
-6. **Wave Bard stager** — bank JSON + samples + rhythms staged, "generate
-   firmware" state; hand-off to the Bastl loader for the actual `.uf2` in v1.
-7. **FX Wizard stager** — rhythm pattern + step count → firmware draft, same
-   "generate firmware" state as Wave Bard.
+6. **Wave Bard stager + local bake** — bank JSON + samples + rhythms staged via
+   `build_draft`, then baked locally into a `k2wb` binary and merged onto the
+   base firmware as a `.uf2` (`build_binary`/`build_uf2` in
+   `server/devices/wave_bard.py` + `server/uf2.py`). No Bastl-loader handoff.
+7. **FX Wizard stager** — rhythm pattern + step count → firmware draft
+   (`build_draft`). The `k2fx` binary baker is still pending (§9).
 8. **Status probe** — presence/transport detection per instrument (mount,
    `/dev/ttyACM*`, card, hub check for SP-404, RPI-RP2 update-mode detection
    for Wave Bard / FX Wizard), plus auto-mount of a visible but unmounted OP-1
@@ -410,6 +424,16 @@ existing projects' test style.
 9. **Server + three.js rack client** — the `three` rack scene, DOM overlay
    panes, drag/drop, job queue, presence dots. No per-instrument 3D models yet
    (that is the next phase, §5.1).
+10. **Sink/source redesign** — the single JSON device tree (`server/devices.json`)
+    as the source of truth for order/labels/capabilities, source panes that list
+    each source device's files, legal-only drag-and-drop with no library pane,
+    and the staged-transfer Apply / Cancel / Undo bar. Adding a device to the
+    tree is enough to extend the rack, the conversion matrix, and the client.
+11. **Local `.uf2` bake + dry-run flash staging** — `server/uf2.py` (UF2
+    read/generate/validate/merge), the Wave Bard `k2wb` baker (`build_binary`/
+    `build_uf2` + `to_wave_bard_pcm16`), and `server/devices/flashable.py`
+    (`find_boot_volumes` + `stage_uf2`, whose `dry_run=True` must always run
+    before any real write). Done for Wave Bard; FX Wizard `k2fx` pending.
 
 **First concrete step:** milestone 1, a failing test for the canonical
 normalizer (`tests/test_normalize.py`), then the smallest implementation that
@@ -429,11 +453,19 @@ passes.
   go directly into `IMPORT/` (subfolders inside it are shown on the unit).
   Unit-side import is `SHIFT+pad13 → UTILITY → IMPORT → IMPORT from SD-CARD →
   SAMPLE`. Writer targets top-level `IMPORT/` — confirmed correct.
-- **Wave Bard and FX Wizard `.uf2` generation offline** — v1 hands off to the
-  Bastl web loaders (sample loader and Chamber). Generating `.uf2` locally is a
-  later milestone gated on the `bastl-instruments/kastle2` toolchain being
-  scriptable. Both loaders save/load a "draft file", which the hub should read
-  and write so a user can round-trip their banks and rhythms.
+- **Wave Bard and FX Wizard `.uf2` generation offline** — Wave Bard RESOLVED
+  (2026-11-20). The `.uf2` is now baked locally: `server/uf2.py` ports Bastl's
+  `uf2Utils.js` (RP2040 UF2 blocks at `USER_DATA_BEGIN = 0x10080000`, family
+  `0xE48BFF56`) and `server/devices/wave_bard.py` ports `waveBardBinaryFormat.js`
+  (the `k2wb` container: 20-byte header, then scales/rhythms/banks/samples as
+  Int16 PCM, `ahoj` end marker), merged onto the vendor `*-no-samples.uf2` with
+  `fill_gaps=True`. The `bastl-instruments/kastle2` toolchain was NOT required —
+  the formats are a straight port of the loaders' JS. FX Wizard's `k2fx`
+  container (`fxWizardBinaryFormat.js`) is the same shape (rhythms only) but its
+  baker is still pending. Remaining: wire `build_uf2` into the draft path and a
+  flash endpoint, and resolve the base-firmware source (vendor file vs runtime
+  fetch). Both loaders save/load a "draft file", which the hub should read and
+  write so a user can round-trip their banks and rhythms.
 - **SP-404 hub detection** — implemented in the M8 status probe: a hub-backed
   card reader reports amber "replug direct" (SPEC §2). Confirmed by synthetic
   sysfs tests; not yet verified against the real unit.
