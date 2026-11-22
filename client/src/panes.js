@@ -6,7 +6,12 @@ import { colorFor } from "./status.js";
 
 export function buildPanes(container, devices) {
   const panes = new Map();
-  for (const device of devices) {
+  // Sources on the left, sinks on the right; a device that is both goes with
+  // the sources. Ordering here is DOM-only: the three.js rack is built from
+  // the server's device order in main.js and is left untouched, so we sort a
+  // copy rather than mutating the array the rack consumed.
+  const ordered = [...devices].sort((a, b) => (a.source ? 0 : 1) - (b.source ? 0 : 1));
+  for (const device of ordered) {
     const pane = document.createElement("section");
     pane.className = "pane instrument";
     pane.dataset.target = device.id;
@@ -58,7 +63,10 @@ export function renderSource(handle, deviceId, entries) {
     badge.className = "badge sample";
     badge.textContent = (entry.rel.split(".").pop() || "wav").toLowerCase();
     li.appendChild(badge);
-    li.appendChild(document.createTextNode(entry.rel));
+    const name = document.createElement("span");
+    name.className = "source-name";
+    name.textContent = entry.rel;
+    li.appendChild(name);
     list.appendChild(li);
   }
 }

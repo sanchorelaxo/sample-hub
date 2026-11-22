@@ -245,6 +245,58 @@ def test_card_overflow_scrolls_within_viewport():
         )
 
 
+def test_dom_panes_ordered_sources_first_scene_untouched():
+    """The DOM panes are re-ordered sources-left then sinks-right (a device that
+    is both source and sink goes with sources). The reorder happens on a copy
+    inside buildPanes, so the three.js rack keeps the server device order."""
+    panes = (CLIENT_DIR / "src/panes.js").read_text()
+    main = (CLIENT_DIR / "src/main.js").read_text()
+
+    assert re.search(r"\[\.\.\.devices\]\.sort", panes), (
+        "buildPanes must sort a copy of the device list (not mutate the input)"
+    )
+    assert re.search(r"a\.source\s*\?\s*0\s*:\s*1", panes), (
+        "the sort must key on device.source so sources precede sinks"
+    )
+    assert "buildRack(THREE, devices)" in main, (
+        "the three.js rack must keep the server order (unmodified devices array)"
+    )
+
+
+def test_instrument_panes_span_full_width():
+    """The instrument panes stretch to fill the screen width so all of them are
+    visible at once, instead of being capped to a fixed per-pane max-width."""
+    css = (CLIENT_DIR / "styles.css").read_text()
+    body = _decls_for(css, ".pane.instrument")
+    assert body is not None, "no .pane.instrument rule in styles.css"
+    assert re.search(r"flex\s*:\s*1\s+1\s+0", body), (
+        ".pane.instrument must grow equally (flex: 1 1 0) to fill the width"
+    )
+    assert "max-width" not in body, (
+        ".pane.instrument must not cap its width so the panes fill the screen"
+    )
+
+
+def test_source_filenames_wrap_not_truncate():
+    """Filenames must always be fully visible: no ellipsis/nowrap truncation on
+    the source item, and the path text wraps instead of being clipped."""
+    css = (CLIENT_DIR / "styles.css").read_text()
+    item = _decls_for(css, ".source-item")
+    assert item is not None, "no .source-item rule in styles.css"
+    assert "text-overflow" not in item, "source filename must not be ellipsized"
+    assert "white-space: nowrap" not in item, "source filename must be allowed to wrap"
+    assert "overflow: hidden" not in item, "source item must not clip its filename"
+    name = _decls_for(css, ".source-name")
+    assert name is not None, "filename must be wrapped in a .source-name span"
+    assert re.search(r"overflow-wrap\s*:\s*anywhere", name), (
+        "long unbroken paths must break anywhere so they stay visible"
+    )
+    panes = (CLIENT_DIR / "src/panes.js").read_text()
+    assert 'className = "source-name"' in panes, (
+        "panes.js must wrap the path text in a .source-name span"
+    )
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_client_source_parses_as_esm():
     for rel in SRC_FILES:

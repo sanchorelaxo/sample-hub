@@ -61,7 +61,7 @@ html, body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.pane.instrument { flex: 1 1 0; max-width: 176px; }
+.pane.instrument { flex: 1 1 0; }
 
 .pane-label {
   margin: 0 0 4px;
@@ -113,18 +113,24 @@ html, body {
   margin: 4px 0;
   border: 1px solid var(--pane-border);
   border-radius: 6px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .source-item {
   cursor: grab;
+  align-items: flex-start;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.source-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .source-item:active { cursor: grabbing; }
 
 .pending-item {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   background: rgba(74, 144, 217, 0.12);
   border-color: rgba(74, 144, 217, 0.35);
   font-size: 11px;
