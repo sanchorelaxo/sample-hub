@@ -205,11 +205,12 @@ the canvas is the only part that changes.
 - **v1 — the rack.** A flat, shaded instrument rack built from `layout.js`
   geometry (one number per instrument position, in millimetres, so positions
   are never hardcoded in mesh code — the same discipline as `op1-web`'s
-  `layout.js` and `queneo-editor`'s `LAYOUT.json`). Each instrument is a
-  labelled plate with a presence-dot surface and a drop zone. The panes that
-  carry lists and readouts are DOM overlays positioned over the plate, exactly
-  like `queneo-editor`'s `pane.js`. `OrbitControls` lets the user tilt around
-  the rack; a camera reset button returns to the straight-on view.
+  `layout.js` and `queneo-editor`'s `LAYOUT.json`). Each instrument is a plate
+  mounting the instrument's photo (sized to the plate width, `assets/photos/<id>.jpg`)
+  with a bold teal nameplate and a presence-dot surface, plus a drop zone. The
+  panes that carry lists and readouts are DOM overlays positioned over the plate,
+  exactly like `queneo-editor`'s `pane.js`. `OrbitControls` lets the user tilt
+  around the rack; a camera reset button returns to the straight-on view.
 - **next phase — per-instrument 3D models.** Replace each plate with a real
   model in the style already proven in the two reference repos: the OP-1 as a
   measured `layout.js` + `model.js` + `screen.js` (from `op1-web`, whose

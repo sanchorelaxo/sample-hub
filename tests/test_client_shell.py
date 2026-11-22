@@ -15,6 +15,7 @@ The drag/drop contract itself is exercised end-to-end by the HTTP tests in
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -26,6 +27,12 @@ import pytest
 from server import hub_server
 
 CLIENT_DIR = Path(__file__).resolve().parent.parent / "client"
+DEVICES_JSON = Path(__file__).resolve().parent.parent / "server" / "devices.json"
+PHOTOS_DIR = CLIENT_DIR / "assets" / "photos"
+
+
+def _device_ids() -> list[str]:
+    return [device["id"] for device in json.loads(DEVICES_JSON.read_text())["devices"]]
 
 VENDOR_FILES = [
     "vendor/three.core.js",
@@ -266,3 +273,68 @@ def test_launcher_serves_client(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5.0)
+
+
+# --- Instrument photos on the 3D rack --------------------------------------
+
+
+def test_rack_photo_matched_by_device_id():
+    """Each plate's photo is resolved from the device id, so a device added to
+    server/devices.json picks up assets/photos/<id>.jpg with no client edit."""
+    scene = (CLIENT_DIR / "src/scene.js").read_text()
+    assert "assets/photos/" in scene, "scene.js must load photos from assets/photos/"
+    assert "${device.id}.jpg" in scene, (
+        "photo filename must be derived from device.id (no hardcoded id map)"
+    )
+
+
+def test_rack_photo_sized_to_plate_width():
+    """The photo's width is the plate width; its height follows the source
+    image's aspect ratio."""
+    scene = (CLIENT_DIR / "src/scene.js").read_text()
+    assert re.search(r"PlaneGeometry\(\s*RACK\.plateWidth", scene), (
+        "photo plane width must be RACK.plateWidth"
+    )
+    assert "aspect" in scene, "photo height must follow the image aspect ratio"
+
+
+def test_z_order_dot_label_photo():
+    """Depth order is dot > label > photo, so the indicator stays visible and
+    the instrument name sits in front of its photo."""
+    scene = (CLIENT_DIR / "src/scene.js").read_text()
+
+    def offset(name):
+        match = re.search(rf"{name}_Z_OFFSET\s*=\s*([\d.]+)", scene)
+        assert match, f"missing {name}_Z_OFFSET"
+        return float(match.group(1))
+
+    assert offset("DOT") > offset("LABEL") > offset("PHOTO"), (
+        "dot must be in front of label, which is in front of photo"
+    )
+
+
+def test_label_bold_teal():
+    """The instrument name renders in bold teal."""
+    scene = (CLIENT_DIR / "src/scene.js").read_text()
+    assert "700" in scene, "label font weight must be bold (700)"
+    color = re.search(r'LABEL_COLOR\s*=\s*"([#0-9a-fA-F]+)"', scene)
+    assert color, "label color must be a named constant"
+    assert color.group(1) == "#2dd4bf", "label color must be teal"
+
+
+def test_photo_asset_for_each_device():
+    for device_id in _device_ids():
+        assert (PHOTOS_DIR / f"{device_id}.jpg").is_file(), (
+            f"missing photo asset for device {device_id!r}"
+        )
+
+
+def test_photo_assets_served_no_store(shell):
+    for device_id in _device_ids():
+        status, headers, data = _request(shell, f"/assets/photos/{device_id}.jpg")
+        assert status == 200, f"/assets/photos/{device_id}.jpg -> {status}"
+        assert headers.get("Content-Type", "").startswith("image/"), (
+            f"{device_id} photo served with wrong content type"
+        )
+        assert headers.get("Cache-Control") == "no-store"
+        assert data
